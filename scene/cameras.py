@@ -83,10 +83,16 @@ def getProjectionMatrixFromIntrinsics(fx, fy, cx, cy, width, height, znear, zfar
     return P
 
 class Camera(nn.Module):
-    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
+    def __init__(self, colmap_id, 
+                 R, T, FoVx, FoVy, 
+                 image,
                  image_name, uid,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda", time = 0,
-                 mask = None, depth:bool=False,
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda", 
+                 time = 0,
+                 background_image=None, 
+                 mask = None, mask_vertices = None, 
+                 depth:bool=False, 
+                 feature:torch.Tensor=None,
                  cxfx=None,
                  width=None, height=None
                  ):
@@ -128,6 +134,10 @@ class Camera(nn.Module):
 
         self.depth = depth
         self.mask = mask
+        self.mask_vertices = mask_vertices
+        self.feature = feature
+        self.background_image = background_image
+        
         self.zfar = 100.0
         self.znear = 0.01
 

@@ -4,21 +4,11 @@ import torch.nn.functional as F
 
 from gsplat.rendering import rasterization
 
-def render(viewpoint_camera, pc,
-           stage="fine", view_args=None):
-    """
-    Render the scene.
-    """
 
-    extras = None
-
+def process_Gaussians(pc, time):
     means3D_ = pc.get_xyz
-    time = torch.tensor(viewpoint_camera.time).to(means3D_.device).repeat(means3D_.shape[0], 1)
-
     colors = pc.get_features
-
-    opacity = pc.get_opacity.clone()
-
+    opacity = pc.get_opacity
     scales = pc.get_scaling_with_3D_filter
     rotations = pc._rotation
 
@@ -30,18 +20,28 @@ def render(viewpoint_camera, pc,
         times_sel=time, 
         h_emb=opacity,
         shs=colors,
-        view_dir=viewpoint_camera.direction_normal(),
     )
     
     opacity = pc.get_fine_opacity_with_3D_filter(opacity)
-    rotation = pc.rotation_activation(rotations)
+    rotations = pc.rotation_activation(rotations)
+    return means3D, rotations, opacity, colors, scales
 
-    view_args= {'vis_mode':'render'}
+def render(viewpoint_camera, pc, view_args=None):
+    """
+    Render the scene.
+    """
+
+    extras = None
+
+    time = torch.tensor(viewpoint_camera.time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1)
+    means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
+    
+    # view_args= {'vis_mode':'render'}
 
             
     # print(.shape, means3D.shape)
     rendered_image, rendered_depth, norms = None, None, None
-    if view_args['vis_mode'] in ['render']:
+    if view_args['vis_mode'] in 'render':
 
         rendered_image, alpha, _ = rasterization(
                         means3D, rotation, scales, opacity.squeeze(-1), colors,
@@ -104,19 +104,14 @@ def render(viewpoint_camera, pc,
         rendered_image = (rendered_image - rendered_image.min())/ (rendered_image.max() - rendered_image.min())
         rendered_image = rendered_image.squeeze(0).permute(2,0,1).repeat(3,1,1)
     
-    
-    # A = (458, 622)
-    # B = (3819, 511)
-    # C = (3999,2504)
-    # D = (375, 2554)
-    # verts = [A,B,C,D]
-    # verts_ = []
-    # for v in verts:
-    #     verts_.append((v[0]/2, v[1]/2))
-    # mask = quad_mask(rendered_image.shape[1], rendered_image.shape[2],verts_, device=rendered_image.device).unsqueeze(0)
-    
-    # warped = warp_into_quad(viewpoint_camera.mask, verts_, out_size=(rendered_image.shape[1], rendered_image.shape[2]))
-    # rendered_image = rendered_image * (~mask) + warped * mask
+
+    # Post process the image
+    # verts = viewpoint_camera.mask_vertices    
+
+    # # create mask based of mask
+    # mask = viewpoint_camera.mask.cuda()
+    # warped = warp_into_quad(viewpoint_camera.background_image, verts, out_size=(rendered_image.shape[1], rendered_image.shape[2]))
+    # rendered_image = rendered_image * (1. - mask) + warped * mask
 
     return {
         "render": rendered_image,
@@ -188,38 +183,22 @@ from utils.loss_utils import l1_loss
 def render_batch(viewpoint_cams, pc):
     """Training renderer the scene"""
     
-    means3D = pc.get_xyz
-    scales = pc.get_scaling_with_3D_filter
-    rotations = pc._rotation
-    colors = pc.get_features
-    opacity = pc.get_opacity
-    
     L1 = 0.
 
-    time = torch.tensor(viewpoint_cams[0].time).to(means3D.device).repeat(means3D.shape[0], 1).detach()
+    mask = ~ (viewpoint_cams[0].mask.cuda().squeeze(0).bool())
+
+
+    time = torch.tensor(viewpoint_cams[0].time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1).detach()
     for idx, viewpoint_camera in enumerate(viewpoint_cams):
         time = time*0. +viewpoint_camera.time
         
-        
-        means3D_final, rotations_final, opacity_final, colors_final, norms = pc._deformation(
-            point=means3D, 
-            rotations=rotations,
-            scales = scales,
-            times_sel=time, 
-            h_emb=opacity,
-            shs=colors,
-            view_dir=viewpoint_camera.direction_normal(),
-        )
-                
-        opacity_final = pc.get_fine_opacity_with_3D_filter(opacity_final)        
-        rotations_final = pc.rotation_activation(rotations_final)
-        
-        scales_final = scales
-        
+        means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
+                        
         # Set up rasterization configuration
         rgb, alpha, _ = rasterization(
-            means3D_final, rotations_final, scales_final, 
-            opacity_final.squeeze(-1), colors_final,
+            means3D, rotation, scales, 
+            opacity.squeeze(-1), colors,
+            
             viewpoint_camera.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
             viewpoint_camera.intrinsics.unsqueeze(0).cuda(),
             viewpoint_camera.image_width, 
@@ -231,7 +210,12 @@ def render_batch(viewpoint_cams, pc):
         )
         rgb = rgb.squeeze(0).permute(2,0,1)
         gt_img = viewpoint_camera.original_image.cuda()
+        
+        # Train Gaussians out-side the background image space
+        rgb = rgb[:, mask]
+        gt_img = gt_img[:, mask]
+        
         L1 += l1_loss(rgb, gt_img)
-   
+           
     return L1
 

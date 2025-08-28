@@ -102,19 +102,14 @@ class GUIBase:
     def viewer_step(self):
         
         if self.switch_off_viewer == False:
-            # self.viewpoint_stack = self.scene.getTrainCameras()
-            
-            # self.scene.getTrainCameras().dataset.get_mask = True
-            # dyn_mask =  self.get_target_mask()
-            # self.scene.getTrainCameras().dataset.get_mask = False
-
             cam = self.free_cams[self.current_cam_index]
-            cam.time = self.time
+            # cam.time = self.time
             buffer_image = render(
                     cam,
                     self.gaussians, 
-                    stage=self.stage,
-                    view_args=None
+                    view_args={
+                        "vis_mode":self.vis_mode 
+                    }
             )
 
             try:
@@ -287,9 +282,9 @@ class GUIBase:
                 def callback_toggle_show_rgb(sender):
                     self.vis_mode = 'render'
                 def callback_toggle_show_depth(sender):
-                    self.vis_mode = 'D'
+                    self.vis_mode = 'depth'
                 def callback_toggle_show_edepth(sender):
-                    self.vis_mode = 'ED'
+                    self.vis_mode = 'Edepth'
                 def callback_toggle_show_norms(sender):
                     self.vis_mode = 'norms'
                 def callback_toggle_show_alpha(sender):
@@ -300,44 +295,7 @@ class GUIBase:
                     dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
                     dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
-                
-                def callback_toggle_show_xyz(sender):
-                    self.vis_mode = 'xyz'
-                def callback_toggle_show_dxyz1(sender):
-                    self.vis_mode = 'dxyz_1'
-                def callback_toggle_show_dxyz3(sender):
-                    self.vis_mode = 'dxyz_3' 
-                    
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="XYZ", callback=callback_toggle_show_xyz)
-                    dpg.add_button(label="dX1", callback=callback_toggle_show_dxyz1)
-                    dpg.add_button(label="dX3", callback=callback_toggle_show_dxyz3)
-                
-                def callback_toggle_show_extra(sender):
-                    self.vis_mode = 'extra' 
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="Extra", callback=callback_toggle_show_extra)
-                
-                def callback_toggle_show_fullopac(sender):
-                    self.full_opacity = ~self.full_opacity
-                def callback_toggle_show_wthesh(sender):
-                    self.set_w_flag = ~self.set_w_flag
-                    
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="h=1", callback=callback_toggle_show_fullopac)
-                    dpg.add_button(label="Set/Unset w", callback=callback_toggle_show_wthesh)
-
-                
-                def callback_show_max_radius(sender):
-                    self.show_radius = dpg.get_value(sender)
-                    
-                dpg.add_slider_float(
-                    label="Show Radial Distance",
-                    default_value=30.,
-                    max_value=50.,
-                    min_value=0.,
-                    callback=callback_show_max_radius,
-                )
+            
                 
                 def callback_speed_control(sender):
                     self.time = dpg.get_value(sender)
@@ -348,49 +306,6 @@ class GUIBase:
                     max_value=1.,
                     min_value=0.,
                     callback=callback_speed_control,
-                )
-                
-                def callback_toggle_view_dynamic(sender):
-                    self.show_dynamic = dpg.get_value(sender)
-                    
-                dpg.add_slider_float(
-                    label="dx > thresh",
-                    default_value=1.,
-                    max_value=1.,
-                    min_value=0.,
-                    callback=callback_toggle_view_dynamic,
-                )
-                def callback_toggle_h_thresh(sender):
-                    self.h_thresh = dpg.get_value(sender)
-                    
-                dpg.add_slider_float(
-                    label="h > thresh",
-                    default_value=0.,
-                    max_value=1.,
-                    min_value=0.,
-                    callback=callback_toggle_h_thresh,
-                )
-                
-                def callback_toggle_w_thresh(sender):
-                    self.w_thresh = dpg.get_value(sender)
-                    
-                dpg.add_slider_float(
-                    label="w > thresh",
-                    default_value=0.,
-                    max_value=3.,
-                    min_value=0.,
-                    callback=callback_toggle_w_thresh,
-                )
-                
-                def callback_toggle_w(sender):
-                    self.w_val = dpg.get_value(sender)
-                    
-                dpg.add_slider_float(
-                    label="Set globa w",
-                    default_value=1.,
-                    max_value=100.,
-                    min_value=0.,
-                    callback=callback_toggle_w,
                 )
                 
             def zoom_callback_fov(sender, app_data):

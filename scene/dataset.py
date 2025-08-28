@@ -25,6 +25,8 @@ class FourDGSdataset(Dataset):
         FovX = self.dataset[index].FovX
         FovY = self.dataset[index].FovY
         time = self.dataset[index].time
+        verts = self.dataset[index].verts
+        CLIP_feature = self.dataset[index].feature
         
         img = Image.open(self.dataset[index].image_path).convert("RGB")
         
@@ -35,16 +37,30 @@ class FourDGSdataset(Dataset):
         img = img.resize((new_w, new_h), Image.LANCZOS)
         img = self.transform(img)
         
-        scale = 0.5  # <-- change this factor as needed
-        mask = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
+        background_image = None
+        # background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
+        # background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
+        # background_image = self.transform(background_image)
+        
+        mask = Image.open(self.dataset[index].image_path.replace('train', 'masks').replace('jpg', 'png')).split()[-1]
         mask = mask.resize((new_w, new_h), Image.LANCZOS)
         mask = self.transform(mask)
         
-        return Camera(colmap_id=index, R=R, T=T, FoVx=FovX, FoVy=FovY, image=img, gt_alpha_mask=None,
-                        image_name=f"{index}", uid=index, data_device=torch.device("cuda"), time=time, 
-                        mask=mask, 
-                        depth=None
-                        )
+        verts_ = []
+        for v in verts:
+            verts_.append((v[0]*scale, v[1]*scale))
+        
+        return Camera(
+            colmap_id=index, 
+            R=R, T=T, FoVx=FovX, FoVy=FovY, 
+            image=img,
+            image_name=f"{index}", 
+            uid=index, data_device=torch.device("cuda"), time=time, 
+            mask=mask, mask_vertices=verts_,
+            background_image=background_image, 
+            depth=None,
+            feature=CLIP_feature
+        )
 
     def __len__(self):
         

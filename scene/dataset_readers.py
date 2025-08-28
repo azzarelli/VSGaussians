@@ -20,12 +20,14 @@ class CameraInfo(NamedTuple):
     FovY: np.array
     FovX: np.array
     image: np.array
+    verts: list
     image_path: str
     image_name: str
     width: int
     height: int
     time : float
     mask: np.array
+    feature: torch.Tensor
    
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -174,7 +176,12 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             
     return cam_infos
 
-def generateSingleViewCameras(path, fx=1528,fy=1538, h=3000, w=4000):
+def generateSingleViewCameras(path, verts, fx=1528,fy=1538, h=3000, w=4000, ):
+    import clip
+    from PIL import Image
+    print('Loading CLIP encoder')
+    model, preprocess = clip.load("ViT-B/32", device="cuda")
+    
     images = os.listdir(path) # Get image fo;es
     fovx = focal2fov(fx, w)
     fovy = focal2fov(fy, h)
@@ -190,16 +197,23 @@ def generateSingleViewCameras(path, fx=1528,fy=1538, h=3000, w=4000):
         image_path = os.path.join(path, frame)
         image = Image.open(image_path)
 
-        image = PILtoTorch(image,(w,h))
+        # Load CLIP embedding
+        CLIP_image = preprocess(image).unsqueeze(0).to("cuda")
+        with torch.no_grad():
+            image_features = model.encode_image(CLIP_image).cpu() # (1, 512)
+            
+        # Load torch image on CPU
+        # image = PILtoTorch(image,(w,h))
         FovY = fovy 
         FovX = fovx
 
-        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                        image_path=image_path, image_name=frame, width=image.shape[1], height=image.shape[2],
-                        time = time, mask=None))
+        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=None,verts=verts,
+                        image_path=image_path, image_name=frame, width=w, height=h,
+                        time = time, mask=None, feature=image_features))
     
-    R = np.eye(3)
-    T = np.zeros(3)
+    del model, preprocess
+    torch.cuda.empty_cache()
+    
     return cam_infos, R, T, fovx, fovy
 
 
@@ -231,7 +245,15 @@ def generateXYZfromDepth(depth_path, R, T,fovx, fovy):
 
 def readHomeStudioInfo(path):
     print("Reading Training Transforms")
-    train_cam_infos, R, T, fx, fy = generateSingleViewCameras(path)
+    # For now we are using single image so lets use a single set of vertices
+    A = (458, 622)
+    B = (3819, 511)
+    C = (3999,2504)
+    D = (375, 2554)
+    verts = [A,B,C,D]
+    
+    
+    train_cam_infos, R, T, fx, fy = generateSingleViewCameras(path, verts)
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     xyz = generateXYZfromDepth('/home/barry/Desktop/other_code/Depth-Anything-V2/depth_vis/002.png', R, T, fx, fy)
@@ -239,10 +261,11 @@ def readHomeStudioInfo(path):
     pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((xyz.shape[0], 3)))
 
 
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           )
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_cam_infos,
+        nerf_normalization=nerf_normalization,
+    )
     return scene_info
 
 sceneLoadTypeCallbacks = {
