@@ -1,3 +1,5 @@
 output/*
 submodules1/*
 submodules/*
+*.pyc
+*/__pycache__/*

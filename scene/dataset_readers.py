@@ -200,7 +200,7 @@ def generateSingleViewCameras(path, verts, fx=1528,fy=1538, h=3000, w=4000, ):
         # Load CLIP embedding
         CLIP_image = preprocess(image).unsqueeze(0).to("cuda")
         with torch.no_grad():
-            image_features = model.encode_image(CLIP_image).cpu() # (1, 512)
+            image_features = model.encode_image(CLIP_image).float().cpu() # (1, 512)
             
         # Load torch image on CPU
         # image = PILtoTorch(image,(w,h))

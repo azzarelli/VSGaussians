@@ -5,19 +5,19 @@ import torch.nn.functional as F
 from gsplat.rendering import rasterization
 
 
-def process_Gaussians(pc, time):
+def process_Gaussians(pc, time, feature):
     means3D_ = pc.get_xyz
     colors = pc.get_features
     opacity = pc.get_opacity
     scales = pc.get_scaling_with_3D_filter
     rotations = pc._rotation
-
+    
 
     means3D, rotations, opacity, colors, extras = pc._deformation(
         point=means3D_, 
         rotations=rotations,
         scales=scales,
-        times_sel=time, 
+        times_sel=feature, 
         h_emb=opacity,
         shs=colors,
     )
@@ -34,7 +34,7 @@ def render(viewpoint_camera, pc, view_args=None):
     extras = None
 
     time = torch.tensor(viewpoint_camera.time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1)
-    means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
+    means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time, viewpoint_camera.feature)
     
     # view_args= {'vis_mode':'render'}
 
@@ -192,7 +192,7 @@ def render_batch(viewpoint_cams, pc):
     for idx, viewpoint_camera in enumerate(viewpoint_cams):
         time = time*0. +viewpoint_camera.time
         
-        means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
+        means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time, viewpoint_camera.feature)
                         
         # Set up rasterization configuration
         rgb, alpha, _ = rasterization(

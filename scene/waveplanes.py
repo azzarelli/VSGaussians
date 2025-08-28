@@ -50,21 +50,19 @@ def sample_from_cov(points, cov6, M):
     
     return samples 
 
-def interpolate_features_MUL(data, M, kplanes):
+def interpolate_features_MUL(data, kplanes):
     """Generate features for each point
     """
     # time m feature
     space = 1.
     spacetime = 1.
-    coltime = 1.
     
-
     # q,r are the coordinate combinations needed to retrieve pts
     coords = [[0,1], [0,2],[3,0], [1,2], [3,1], [3,2]]
     for i in range(len(coords)):
         q,r = coords[i]
         feature = kplanes[i](data[..., (q, r)])
-        feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
+        # feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
         # feature = torch.prod(feature, dim=1)
 
         if i in [0,1,3]:
@@ -72,32 +70,7 @@ def interpolate_features_MUL(data, M, kplanes):
 
         elif i in [2, 4, 5]:
             spacetime = spacetime * feature
-
-    # coords = [[3,0], [3,1], [3,2]]
-    # for i in range(len(coords)):
-    #     q,r = coords[i]
-    #     feature = kplanes[6+i](data[..., (q, r)])
-    #     feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
-
-    #     coltime = coltime * feature
-
-    return space, spacetime, coltime
-   
-
-def interpolate_features_theta(pts, angle, kplanes):
-    """Generate features for each point
-    """
-    feature = 1.
-    
-    data = torch.cat([pts, angle], dim=-1)
-    
-    # q,r are the coordinate combinations needed to retrieve pts
-    coords = [[0,3], [1,3],[2,3]]
-    for i in range(len(coords)):
-        q,r = coords[i]
-
-        feature = feature * kplanes[6+i](data[..., (q,r)])
-    return feature
+    return space, spacetime
    
 
 import matplotlib.pyplot as plt
@@ -244,11 +217,6 @@ class WavePlaneField(nn.Module):
         self.aabb = nn.Parameter(aabb, requires_grad=False)
         print("Voxel Plane: set aabb=", self.aabb)
 
-    def update_J(self):
-        for grid in self.grids:
-            grid.update_J()
-        print(f'Updating J to {self.grids[0].current_J}')
-
     def waveplanes_list(self):
         planes = []
         for grid in self.grids:
@@ -274,32 +242,17 @@ class WavePlaneField(nn.Module):
 
         return ms_planes
 
-    def forward(self, pts, time, cov6):
-        """
-            Notes:
-                - to visualize samples and projection use display_projection(pts, cov6)
-                    - you can modify the constants K_a and K_b to see that the samples get plotted closer to the edge
-        """
-        M = 13 # total of 13 samples
-        pts = structured_gaussian_samples(pts, cov6)
-        # display_projection(pts, cov6) # re:notes
-        
-        time = (time*2.)-1. # go from 0 to 1 to -1 to +1 for grid interp
-        time = time.repeat(pts.shape[1], 1)
+    def forward(self, pts, feature):
+        feature = feature.repeat(pts.shape[0], 1)
                 
         pts = normalize_aabb(pts, self.aabb)
-        pts = pts.reshape(-1, pts.shape[-1])
-        
-        pts = torch.cat([pts.view(-1, 3), time], dim=-1)
+        pts = pts.reshape(-1, 3)
+
+        pts = torch.cat([pts, feature], dim=-1)
         
         return interpolate_features_MUL(
-            pts, M, self.grids)
+            pts, self.grids)
 
-    def theta(self, pts, angle):
-        pts = normalize_aabb(pts, self.aabb)
-        pts = pts.reshape(-1, pts.shape[-1])
-        return interpolate_features_theta(
-            pts,angle, self.grids)
 
 def display_projection(pts, cov6):
     B = 5
