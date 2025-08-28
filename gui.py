@@ -156,7 +156,7 @@ class GUI(GUIBase):
         
         L1 = render_batch(
             viewpoint_cams, 
-            self.gaussians
+            self.gaussians 
         )
 
         # planeloss = self.gaussians.compute_regulation(
