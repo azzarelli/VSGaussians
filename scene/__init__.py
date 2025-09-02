@@ -45,7 +45,8 @@ class Scene:
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
         self.train_camera = FourDGSdataset(scene_info.train_cameras, args, dataset_type)
-
+        self.video_cameras = FourDGSdataset(scene_info.video_cameras, args, dataset_type)
+        
         if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
 

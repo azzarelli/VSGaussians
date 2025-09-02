@@ -102,7 +102,12 @@ class GUIBase:
     def viewer_step(self):
         
         if self.switch_off_viewer == False:
+            # cam = self.scene.video_cameras[0]
+            # print(cam.R, cam.T)
+            
             cam = self.free_cams[self.current_cam_index]
+            # print('freen', cam.R, cam.T)
+
             # cam.time = self.time
             buffer_image = render(
                     cam,
@@ -282,9 +287,9 @@ class GUIBase:
                 def callback_toggle_show_rgb(sender):
                     self.vis_mode = 'render'
                 def callback_toggle_show_depth(sender):
-                    self.vis_mode = 'depth'
+                    self.vis_mode = 'D'
                 def callback_toggle_show_edepth(sender):
-                    self.vis_mode = 'Edepth'
+                    self.vis_mode = 'ED'
                 def callback_toggle_show_norms(sender):
                     self.vis_mode = 'norms'
                 def callback_toggle_show_alpha(sender):

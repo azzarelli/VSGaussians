@@ -22,6 +22,12 @@ elif [ "$3" == "skip-coarse" ]; then
   echo "Skip Coarse..."
 
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s /media/barry/56EA40DEEA40BBCD/DATA/studio_test/backgrounds/$SAVEDIR/ --expname "home/$SAVEDIR/$EXP_NAME" --configs arguments/dynerf/steak.py --test_iterations 1000 --skip-coarse $4
+
+elif [ "$3" == "nvs" ]; then
+  echo "NVS..."
+
+  CUDA_LAUNCH_BLOCKING=1 python nvs.py -s /media/barry/56EA40DEEA40BBCD/DATA/studio_test/backgrounds/$SAVEDIR/ --expname "home/$SAVEDIR/$EXP_NAME" --configs arguments/dynerf/steak.py --test_iterations 1000 --start_checkpoint $4 --view-test
+
 else
   echo "Training starting..."
 

@@ -38,7 +38,6 @@ def render(viewpoint_camera, pc, view_args=None):
     
     # view_args= {'vis_mode':'render'}
 
-            
     # print(.shape, means3D.shape)
     rendered_image, rendered_depth, norms = None, None, None
     if view_args['vis_mode'] in 'render':
@@ -185,7 +184,7 @@ def render_batch(viewpoint_cams, pc):
     
     L1 = 0.
 
-    mask = ~ (viewpoint_cams[0].mask.cuda().squeeze(0).bool())
+    mask = 1.- (viewpoint_cams[0].mask.cuda().squeeze(0))
 
 
     time = torch.tensor(viewpoint_cams[0].time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1).detach()
@@ -212,8 +211,8 @@ def render_batch(viewpoint_cams, pc):
         gt_img = viewpoint_camera.original_image.cuda()
         
         # Train Gaussians out-side the background image space
-        rgb = rgb[:, mask]
-        gt_img = gt_img[:, mask]
+        rgb = rgb
+        gt_img = gt_img * mask
         
         L1 += l1_loss(rgb, gt_img)
            

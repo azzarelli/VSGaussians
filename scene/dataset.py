@@ -38,9 +38,9 @@ class FourDGSdataset(Dataset):
         img = self.transform(img)
         
         background_image = None
-        # background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
-        # background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
-        # background_image = self.transform(background_image)
+        background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
+        background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
+        background_image = self.transform(background_image)
         
         mask = Image.open(self.dataset[index].image_path.replace('train', 'masks').replace('jpg', 'png')).split()[-1]
         mask = mask.resize((new_w, new_h), Image.LANCZOS)

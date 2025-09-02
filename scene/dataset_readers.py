@@ -32,6 +32,7 @@ class CameraInfo(NamedTuple):
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: list
+    video_cameras: list
     nerf_normalization: dict
 
 def getNerfppNorm(cam_info):
@@ -192,7 +193,7 @@ def generateSingleViewCameras(path, verts, fx=1528,fy=1538, h=3000, w=4000, ):
         time = float(idx)/F_max
         
         R = np.eye(3)
-        T = np.zeros(3)
+        T = np.zeros(3) # Z-direction +0.1 is backwards
         
         image_path = os.path.join(path, frame)
         image = Image.open(image_path)
@@ -216,6 +217,40 @@ def generateSingleViewCameras(path, verts, fx=1528,fy=1538, h=3000, w=4000, ):
     
     return cam_infos, R, T, fovx, fovy
 
+def circle_in_image_plane(R=np.eye(3), C0=np.zeros(3), cam_infos=None, r=1.0, n_steps=70):
+    # Camera local axes in world space
+    u = R @ np.array([1.0, 0.0, 0.0])  # right
+    v = R @ np.array([0.0, 1.0, 0.0])  # up
+
+    thetas = np.linspace(0, 2*np.pi, n_steps, endpoint=False)
+    poses = []
+
+    d = np.zeros(3)
+
+
+    for idx, th in enumerate(thetas):
+        cam = cam_infos[idx % len(cam_infos)]
+        # Camera center in world coordinates on the circle
+        C = C0 + r*np.cos(th)*u + r*np.sin(th)*v
+        # Keep orientation fixed
+        R_wc = R.copy()
+        # OpenCV extrinsics: x_c = R x_w + t, with t = -R*C
+        t = -R_wc @ C
+
+        # 4x4 [R|t] extrinsic (OpenCV-style block, last row [0,0,0,1])
+        ext = np.eye(4)
+        ext[:3,:3] = R_wc
+        ext[:3, 3] = t
+        
+        d[2] += 0.001
+        C = C0 + d
+
+        poses.append(CameraInfo(uid=idx, R=R, T=C0, FovY=cam.FovY, FovX=cam.FovX, image=None,verts=cam.verts,
+                        image_path=cam.image_path, image_name=cam.image_name, width=cam.width, height=cam.height,
+                        time=cam.time, mask=None, feature=cam.feature))
+                     
+
+    return poses
 
 def generateXYZfromDepth(depth_path, R, T,fovx, fovy):
     # Load depth map (assumed grayscale, single channel)
@@ -254,6 +289,7 @@ def readHomeStudioInfo(path):
     
     
     train_cam_infos, R, T, fx, fy = generateSingleViewCameras(path, verts)
+    video_cam_infos = circle_in_image_plane(R=R, C0=T, cam_infos=train_cam_infos, r=0.01, n_steps=70)
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     xyz = generateXYZfromDepth('/home/barry/Desktop/other_code/Depth-Anything-V2/depth_vis/002.png', R, T, fx, fy)
@@ -264,6 +300,7 @@ def readHomeStudioInfo(path):
     scene_info = SceneInfo(
         point_cloud=pcd,
         train_cameras=train_cam_infos,
+        video_cameras=video_cam_infos,
         nerf_normalization=nerf_normalization,
     )
     return scene_info

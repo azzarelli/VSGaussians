@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from utils.timer import Timer
 
 
-from gaussian_renderer import render_batch
+from gaussian_renderer import render_batch, render
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
@@ -119,8 +119,8 @@ class GUI(GUIBase):
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                 num_workers=16, collate_fn=list))
             
-            viewpoint_stack = [self.scene.getTrainCameras()[0]]
-            self.filter_3D_stack = viewpoint_stack.copy()
+        viewpoint_stack = [self.scene.getTrainCameras()[0]]
+        self.filter_3D_stack = viewpoint_stack.copy()
     
     @property
     def get_batch_views(self, stack=None):
@@ -203,6 +203,81 @@ class GUI(GUIBase):
             # if self.iteration % self.opt.opacity_reset_interval == 0 and self.iteration < (self.final_iter - 100):
             #     self.gaussians.reset_opacity()
 
+
+    def nvs(self):
+
+        # Start recording step duration
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
+        cameras = self.scene.video_cameras        
+        
+        for idx, cam in enumerate(cameras):
+            buffer_image = render(
+                    cam,
+                    self.gaussians, 
+                    view_args={
+                        "vis_mode":"render"
+                    }
+            )["render"]
+            
+            save_novel_views(buffer_image, 
+                idx, self.args.expname)
+            
+            buffer_image = torch.nn.functional.interpolate(
+                buffer_image.unsqueeze(0),
+                size=(self.H,self.W),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+
+            self.buffer_image = (
+                buffer_image.permute(1, 2, 0)
+                .contiguous()
+                .clamp(0, 1)
+                .contiguous()
+                .detach()
+                .cpu()
+                .numpy()
+            )
+
+            buffer_image = self.buffer_image
+
+            dpg.set_value(
+                "_texture", buffer_image
+            )  # buffer must be contiguous, else seg fault!
+            
+            # Add _log_view_camera
+            dpg.set_value("_log_view_camera", f"Rendering Nove Views")
+
+
+            dpg.render_dearpygui_frame()
+
+
+import cv2
+def save_novel_views(pred, idx, name):
+    pred = (pred.permute(1, 2, 0)
+        # .contiguous()
+        .clamp(0, 1)
+        .contiguous()
+        .detach()
+        .cpu()
+        .numpy()
+    )*255
+
+    pred = pred.astype(np.uint8)
+
+    # Convert RGB to BGR for OpenCV
+    pred_bgr = cv2.cvtColor(pred, cv2.COLOR_RGB2BGR)
+
+    if not os.path.exists(f'output/{name}/nvs/'):
+        os.mkdir(f'output/{name}/nvs/')
+        os.mkdir(f'output/{name}/nvs/full/')
+    elif not os.path.exists(f'output/{name}/nvs/full/'):
+        os.mkdir(f'output/{name}/nvs/full/')
+    cv2.imwrite(f'output/{name}/nvs/full/{idx}.png', pred_bgr)
+
+    return pred_bgr
 
 def setup_seed(seed):
      torch.manual_seed(seed)
