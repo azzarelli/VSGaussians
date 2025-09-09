@@ -74,6 +74,7 @@ if __name__ == "__main__":
         view_test=args.view_test,
         use_gui=True
     )
-    gui.nvs()
+    with torch.no_grad():
+        gui.analyse_gaussian_illumination()
     del gui
     torch.cuda.empty_cache()

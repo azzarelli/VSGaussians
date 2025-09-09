@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from utils.timer import Timer
 
 
-from gaussian_renderer import render_batch, render
+from gaussian_renderer import render_batch, render, point_illumination_changes
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
@@ -253,6 +253,46 @@ class GUI(GUIBase):
 
             dpg.render_dearpygui_frame()
 
+    def analyse_gaussian_illumination(self):
+
+        # Start recording step duration
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        
+        cameras = self.scene.video_cameras        
+
+        buffer_image = point_illumination_changes(
+                cameras,
+                self.gaussians
+        )["render"]
+        
+        buffer_image = torch.nn.functional.interpolate(
+            buffer_image.unsqueeze(0),
+            size=(self.H,self.W),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+
+        buffer_image = (
+            buffer_image.permute(1, 2, 0)
+            .contiguous()
+            .clamp(0, 1)
+            .contiguous()
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        
+        while dpg.is_dearpygui_running():
+            
+
+            dpg.set_value(
+                "_texture", buffer_image
+            )  # buffer must be contiguous, else seg fault!
+            
+
+            dpg.render_dearpygui_frame()
+        dpg.destroy_context()
 
 import cv2
 def save_novel_views(pred, idx, name):

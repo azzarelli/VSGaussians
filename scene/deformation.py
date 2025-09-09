@@ -79,7 +79,7 @@ class Deformation(nn.Module):
         net_size = self.W
         self.spacetime_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
 
-        self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1),nn.Sigmoid())
+        self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1), nn.Sigmoid())
 
         
         self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*3))
@@ -99,14 +99,14 @@ class Deformation(nn.Module):
     def forward(self,rays_pts_emb, rotations_emb, scale_emb, shs_emb, view_dir, time_emb, h_emb):
 
         # covariances = self.covariance_activation(scale_emb, 1., rotations_emb)
-        dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
+        # dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
         
-        shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
+        # shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
         
         # Essentially no view-dependancy
         # shs[1:] *= 0.
         
-        return rays_pts_emb, rotations_emb, h_emb[:,0].unsqueeze(-1), shs, None
+        return rays_pts_emb, rotations_emb, h_emb[:,0].unsqueeze(-1), shs_emb, None
     
     def get_mlp_parameters(self):
         parameter_list = []

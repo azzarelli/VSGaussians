@@ -17,11 +17,16 @@ class CameraInfo(NamedTuple):
     uid: int
     R: np.array
     T: np.array
+    c2w: np.array
     FovY: np.array
     FovX: np.array
     image: np.array
     verts: list
     image_path: str
+    s_path: str
+    so_path: str
+    g_path: str
+    b_path:str
     image_name: str
     width: int
     height: int
@@ -196,10 +201,30 @@ def generateSingleViewCameras(path, verts, fx=1528,fy=1538, h=3000, w=4000, ):
         T = np.zeros(3) # Z-direction +0.1 is backwards
         
         image_path = os.path.join(path, frame)
-        image = Image.open(image_path)
+        image = Image.open(image_path.replace("train", "backgrounds"))
 
         # Load CLIP embedding
         CLIP_image = preprocess(image).unsqueeze(0).to("cuda")
+
+        CLIP_image *= 0
+        CLIP_image[:, 0] = 1.
+        
+        # Display CLIP processed image
+        # import matplotlib.pyplot as plt
+        # img = CLIP_image.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        
+        # # If values are in [0,1] it's fine, but if in [-1,1] or [0,255], normalize
+        # if img.min() < 0:
+        #     img = (img - img.min()) / (img.max() - img.min())
+        # elif img.max() > 1.0:
+        #     img = img / 255.0
+        
+        # plt.imshow(img)
+        # plt.axis("off")
+        # plt.show()
+        # CLIP_image *= 0
+        # CLIP_image[:, 0] = 1.
+        
         with torch.no_grad():
             image_features = model.encode_image(CLIP_image).float().cpu() # (1, 512)
             
@@ -278,7 +303,7 @@ def generateXYZfromDepth(depth_path, R, T,fovx, fovy):
     # Camera coords
     return np.stack((x, y, z), axis=-1).reshape(-1, 3)[::2]
 
-def readHomeStudioInfo(path):
+def readHomeStudioInfo_singleview(path):
     print("Reading Training Transforms")
     # For now we are using single image so lets use a single set of vertices
     A = (458, 622)
@@ -301,6 +326,99 @@ def readHomeStudioInfo(path):
         point_cloud=pcd,
         train_cameras=train_cam_infos,
         video_cameras=video_cam_infos,
+        nerf_normalization=nerf_normalization,
+    )
+    return scene_info
+
+from scipy.spatial.transform import Rotation
+OPENGL = np.array([[1, 0, 0, 0],
+                   [0, -1, 0, 0],
+                   [0, 0, -1, 0],
+                   [0, 0, 0, 1]])
+
+def readStudioCams(path, cams2world, focal, H, W, xyz):    
+    cams = ['cam00','cam01', 'cam02', 'cam03']
+    
+    # upsample intrinsics to match the original image
+    focal = focal * 2.5
+    W = 1280 
+    H = 720 
+    
+    fovx = focal2fov(focal, W)
+    fovy = focal2fov(focal, H)
+    cam_infos = []
+    
+    
+    
+    rot = np.eye(4)
+    rot[:3, :3] = Rotation.from_euler('y', np.deg2rad(180)).as_matrix()
+    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
+    cams2world_aligned = [ (global_T @ c2w) for c2w in cams2world ]
+    
+    pts_h = np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)
+    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
+
+    xyz = (global_T @ pts_h.T).T[:, :3]
+    im_name = 'image_001.png'
+    for idx, pose in enumerate(cams2world_aligned):
+        image_path = os.path.join(path, cams[idx], im_name)
+        so_path = os.path.join(path,'masks/scene_ocluded_masks', f'{cams[idx]}.png')
+        s_path = os.path.join(path,'masks/scene_masks', f'{cams[idx]}.png')
+        g_path = os.path.join(path,'masks/glass_masks', f'{cams[idx]}.png')
+        b_path = os.path.join(path,'cropped_images', im_name)
+
+        # M = np.diag([1, -1, -1, 1]).astype(np.float32)
+        # pose = M @ pose @ M
+
+        w2c = np.linalg.inv(pose)
+        R = w2c[:3,:3]  # rotation
+        T = w2c[:3,3] 
+        
+
+        FovY = fovy 
+        FovX = fovx
+        w = W
+        h = H
+
+        cam_infos.append(CameraInfo(uid=idx,c2w=pose, R=R, T=T, FovY=FovY, FovX=FovX, image=None,
+                        image_path=image_path, image_name=f'{idx}', width=w, height=h,
+                        so_path=so_path, s_path=s_path, g_path=g_path,b_path=b_path,
+                        time = 0., mask=None, verts=None, feature=0.))
+    
+    return cam_infos, xyz
+
+def readHomeStudioInfo(path):
+    print("Reading Training Data")
+    meta_pth = os.path.join(path, 'sfm_meta', 'info.json')
+    
+    with open(meta_pth, "r") as f:
+        meta = json.load(f)
+    
+    # Get the camera pose data
+    focal = meta['focals'][0] # shared intrinsics
+    W,H = meta['imsize'][0][0], meta['imsize'][0][1]
+    poses = meta['cams2world']
+    c2w = []
+    for pose in poses:
+        c2w.append(np.array(pose))
+    
+    pcd_path = os.path.join(path, 'sfm_meta', 'pointcloud.npy')
+    pcd = np.load(pcd_path, allow_pickle=True).item()
+    pts = pcd["points"]
+    
+    train_cams,pts = readStudioCams(path, c2w, focal, H, W, pts)
+    nerf_normalization = getNerfppNorm(train_cams)
+
+    # Get point cloud data
+    
+    col = pcd["colors"]
+    pcd = BasicPointCloud(points=pts, colors=col, normals=np.zeros((pts.shape[0], 3)))
+
+
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_cams,
+        video_cameras=train_cams,
         nerf_normalization=nerf_normalization,
     )
     return scene_info

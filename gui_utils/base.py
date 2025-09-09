@@ -161,7 +161,7 @@ class GUIBase:
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))
         self.scene.save(self.iteration, self.stage)
         print("\n[ITER {}] Saving Checkpoint".format(self.iteration))
-        torch.save((self.gaussians.capture(), self.iteration), self.scene.model_path + "/chkpnt" + f"_{self.stage}_" + str(self.iteration) + ".pth")
+        torch.save((self.gaussians.capture(), self.iteration), self.scene.model_path + "/chkpnt" + f"_" + str(self.iteration) + ".pth")
 
     def register_dpg(self):
         

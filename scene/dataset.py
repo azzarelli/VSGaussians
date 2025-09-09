@@ -25,30 +25,28 @@ class FourDGSdataset(Dataset):
         FovX = self.dataset[index].FovX
         FovY = self.dataset[index].FovY
         time = self.dataset[index].time
-        verts = self.dataset[index].verts
+        # verts = self.dataset[index].verts
         CLIP_feature = self.dataset[index].feature
         
         img = Image.open(self.dataset[index].image_path).convert("RGB")
-        
         # Downsample
-        scale = 0.5  # <-- change this factor as needed
-        w, h = img.size
-        new_w, new_h = int(w * scale), int(h * scale)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # new_w, new_h = 512, 288
+        # img = img.resize((new_w, new_h), Image.LANCZOS)
         img = self.transform(img)
         
         background_image = None
-        background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
-        background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
-        background_image = self.transform(background_image)
+        # background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
+        # background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
+        # background_image = self.transform(background_image)
         
-        mask = Image.open(self.dataset[index].image_path.replace('train', 'masks').replace('jpg', 'png')).split()[-1]
-        mask = mask.resize((new_w, new_h), Image.LANCZOS)
-        mask = self.transform(mask)
+        mask = None
+        mask = Image.open(self.dataset[index].so_path).split()[-1] # get alpha chamme;
+        # mask = mask.resize((new_w, new_h), Image.LANCZOS)
+        mask = 1.- self.transform(mask)
         
         verts_ = []
-        for v in verts:
-            verts_.append((v[0]*scale, v[1]*scale))
+
         
         return Camera(
             colmap_id=index, 

@@ -6,23 +6,23 @@ from gsplat.rendering import rasterization
 
 
 def process_Gaussians(pc, time, feature):
-    means3D_ = pc.get_xyz
+    means3D = pc.get_xyz
     colors = pc.get_features
     opacity = pc.get_opacity
     scales = pc.get_scaling_with_3D_filter
     rotations = pc._rotation
     
 
-    means3D, rotations, opacity, colors, extras = pc._deformation(
-        point=means3D_, 
-        rotations=rotations,
-        scales=scales,
-        times_sel=feature, 
-        h_emb=opacity,
-        shs=colors,
-    )
+    # means3D, rotations, opacity, colors, extras = pc._deformation(
+    #     point=means3D, 
+    #     rotations=rotations,
+    #     scales=scales,
+    #     times_sel=feature, 
+    #     h_emb=opacity,
+    #     shs=colors,
+    # )
     
-    opacity = pc.get_fine_opacity_with_3D_filter(opacity)
+    opacity = pc.get_fine_opacity_with_3D_filter(opacity[:,0].unsqueeze(-1))
     rotations = pc.rotation_activation(rotations)
     return means3D, rotations, opacity, colors, scales
 
@@ -107,9 +107,12 @@ def render(viewpoint_camera, pc, view_args=None):
     # Post process the image
     # verts = viewpoint_camera.mask_vertices    
 
-    # # create mask based of mask
+    # create mask based of mask
     # mask = viewpoint_camera.mask.cuda()
-    # warped = warp_into_quad(viewpoint_camera.background_image, verts, out_size=(rendered_image.shape[1], rendered_image.shape[2]))
+    # backgroundimg = viewpoint_camera.background_image
+    # backgroundimg *=0.
+    # backgroundimg[0, ...] = 1
+    # warped = warp_into_quad(backgroundimg, verts, out_size=(rendered_image.shape[1], rendered_image.shape[2]))
     # rendered_image = rendered_image * (1. - mask) + warped * mask
 
     return {
@@ -117,6 +120,43 @@ def render(viewpoint_camera, pc, view_args=None):
         "extras":extras # A dict containing mor point info
         # 'norms':rendered_norm, 'alpha':rendered_alpha
         }
+
+
+def point_illumination_changes(cameras, pc):
+
+    N = 1 #len(cameras)
+    # colors_history = pc.get_features.unsqueeze(1) # N, A, 16, 3, we introduce A axis for storing history
+    # colors_history = colors_history.repeat(1, N, 1, 1)
+
+    for idx, viewpoint_camera in enumerate(cameras):
+        time = torch.tensor(viewpoint_camera.time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1)
+        means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time, viewpoint_camera.feature)
+        
+    #     colors_history[:, idx, ...] = colors # Track the color for the current iterations
+        
+        if idx + 1 >= N:
+            break
+    
+    # colors = colors_history.var(dim=1)
+    # colors = colors[:, 3, ...]
+    
+    # Render based on changes
+    rendered_image, alpha, _ = rasterization(
+                    means3D, rotation, scales, opacity.squeeze(-1), colors,
+
+        viewpoint_camera.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
+        viewpoint_camera.intrinsics.unsqueeze(0).cuda(),
+        viewpoint_camera.image_width, 
+        viewpoint_camera.image_height,
+        
+        rasterize_mode='antialiased',
+        eps2d=0.1,
+        sh_degree=pc.active_sh_degree
+    )
+    rendered_image = rendered_image.squeeze(0).permute(2,0,1)
+
+
+    return {"render": rendered_image}
 
 
 import torchvision.transforms.functional as FF
