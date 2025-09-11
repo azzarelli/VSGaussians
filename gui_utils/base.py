@@ -6,13 +6,14 @@ import psutil
 import torch
 from gaussian_renderer import render
 from tqdm import tqdm
+
 class GUIBase:
     """This method servers to intialize the DPG visualization (keeping my code cleeeean!)
     
         Notes:
             none yet...
     """
-    def __init__(self, gui, scene, gaussians, runname, view_test):
+    def __init__(self, gui, scene, gaussians, runname, view_test, bundle_adjust):
         
         self.gui = gui
         self.scene = scene
@@ -22,7 +23,6 @@ class GUIBase:
         
         # Set the width and height of the expected image
         self.W, self.H = self.scene.getTrainCameras()[0].image_width, self.scene.getTrainCameras()[0].image_height
-        self.fov = (self.scene.getTrainCameras()[0].FoVy, self.scene.getTrainCameras()[0].FoVx)
 
         if self.H > 1200 and self.scene != "dynerf":
             self.W = self.W//2
@@ -55,15 +55,183 @@ class GUIBase:
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         
-        if self.gui:
+        self.trainable_abc = None
+        
+        if bundle_adjust:
+            self.run_bundle_adjustment()
+        elif self.gui:
             print('DPG loading ...')
             dpg.create_context()
             self.register_dpg()
-    
+
+    def run_bundle_adjustment(self):
+        # Load DPG
+        print('Running Bundle Adjustment...')
+        dpg.create_context()
+        self.register_dpg()
+        
+        from dataprocess.utils.ray_tracer import TrainCam, TrainABC, SharedIntrinsics
+        import cv2
+
+        # Initialize the shared intrinsics
+        initialize_intrinsics = True
+
+
+        # Initialize the Trainable c2w parameters
+        self.scene.train_camera.loading_flags["image"] = True
+        self.scene.train_camera.loading_flags["glass"] = False
+        self.scene.train_camera.loading_flags["scene_occluded"] = False
+        self.scene.train_camera.loading_flags["scene"] = True
+        initial_dataset = self.scene.train_camera
+        trainable_c2w = []
+        for cam in initial_dataset:
+            trainable_c2w.append(TrainCam(cam.world_view_transform.inverse().transpose(0,1)))
+
+        #####
+        # Approximate the corners of the IBL using the Mast3r approx point cloud
+        #####
+                
+        abcd = []
+        pcd = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
+        abcd = []
+        for cam in initial_dataset:
+            # Initilize the intrinsics using the first cam's parameters
+            if initialize_intrinsics:
+                trainable_intrinsics = SharedIntrinsics(
+                    cam.image_height, cam.image_width,
+                    cam.intrinsics
+                )
+                initialize_intrinsics=False
+
+                
+            masked_img = (~cam.scene_mask.bool()).squeeze(0).numpy().astype(np.uint8)
+            
+            # Solve the vertices of each image
+            contours, _ = cv2.findContours(masked_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cnt = max(contours, key=cv2.contourArea)
+            
+            peri = cv2.arcLength(cnt, True)
+            for eps in np.linspace(0.01, 0.1, 20):   # try different tolerances
+                approx = cv2.approxPolyDP(cnt, eps * peri, True)
+                if len(approx) == 4:
+                    pts = approx.reshape(4, 2)   # (x, y)
+                    break
+            else:    
+                raise RuntimeError("Could not approximate quadrilateral")
+                        
+            # Order the ABCD image vertices
+            s = pts.sum(axis=1)
+            diff = np.diff(pts, axis=1)
+            ordered = np.zeros((4,2), dtype="float32")
+            ordered[0] = pts[np.argmin(s)]       # top-left (min x+y)
+            ordered[2] = pts[np.argmax(s)]       # bottom-right (max x+y)
+            ordered[1] = pts[np.argmin(diff)]    # top-right (min x-y)
+            ordered[3] = pts[np.argmax(diff)]    # bottom-left (max x-y)
+            ordered = torch.from_numpy(ordered).int()
+            
+            ABCD = []
+            for (x,y) in ordered:
+                # x,y = int(x/2.5), int(y/2.5)
+                point = get_in_view_dyn_mask(cam, pcd, x,y)
+
+                ABCD.append(point.unsqueeze(0))
+            abcd.append(torch.cat(ABCD, dim=0).unsqueeze(0))
+        abcd = torch.cat(abcd, dim=0)[0]
+        
+        # TODO: load cam background image
+        background_texture = self.scene.ibl[0].cuda()
+        self.trainable_abc = TrainABC(abcd, background_texture.shape[1], background_texture.shape[2], background_texture)
+        
+        lr = 1e-3
+        intr_optim = torch.optim.Adam(trainable_intrinsics.parameters(), lr=lr)
+        cam_optims = [torch.optim.Adam(m.parameters(), lr=lr) for m in trainable_c2w]
+        suf_optim = torch.optim.Adam(self.trainable_abc.parameters(), lr=lr)
+
+        # Re-initialize dataset to get different masks:
+        self.scene.train_camera.loading_flags["image"] = True
+        self.scene.train_camera.loading_flags["glass"] = False
+        self.scene.train_camera.loading_flags["scene_occluded"] = True
+        self.scene.train_camera.loading_flags["scene"] = False
+        initial_dataset = self.scene.train_camera
+        
+        TRAIN=False
+        if TRAIN:
+            max_iterations = 10
+            for iteration in range(max_iterations):
+                
+                intr_optim.zero_grad()
+                suf_optim.zero_grad()
+                for opt in cam_optims:
+                    opt.zero_grad()
+                loss = 0.
+                
+                
+                for traincam, cam in zip(trainable_c2w, initial_dataset):
+                    
+
+                    H,W, fx,fy,cx,cy = trainable_intrinsics()
+                    abc = self.trainable_abc()
+                    c2w = traincam()
+                    
+                    origin,direction = cam.generate_rays(c2w, H, W, fx,fy,cx,cy)
+
+                    sampled = cam.surface_sample(origin, direction, abc, background_texture)
+                    
+                    gt_img = cam.image.cuda() * 1. - cam.sceneoccluded_mask.cuda()
+                    loss += ((gt_img - sampled)**2).mean()
+                loss.backward()
+                intr_optim.step()
+                suf_optim.step()
+                for opt in cam_optims:
+                    opt.step()
+                
+                with torch.no_grad():
+                    if iteration % 2 == 0:
+                        self.viewer_step()
+                    dpg.set_value("_log_iter", f"Bundle Adjustment: {iteration} its")
+                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
+
+                    dpg.render_dearpygui_frame()
+                    
+        _, _, fx,fy,cx,cy = trainable_intrinsics()
+        fx = fx.detach().cpu().item()
+        fy = fy.detach().cpu().item()
+        cx = cx.detach().cpu().item()
+        cy = cy.detach().cpu().item()
+        
+        final_cams = [] #[self.scene.getTrainCameras()[idx] for idx in range(len(self.scene.getTrainCameras()))]
+        for traincam, cam in zip(trainable_c2w, initial_dataset):
+            cam.fx = fx
+            cam.fy = fy
+            cam.cx = cx
+            cam.cy = cy
+            c2w = traincam().detach().cpu().numpy()
+            w2c = np.linalg.inv(c2w)
+            cam.R = w2c[:3, :3]
+            cam.T = w2c[:3, 3]
+            cam.update_projections()
+            final_cams.append(cam)
+        
+        self.free_cams = final_cams
+        self.current_cam_index = 0
+        self.scene.update_scene(self.trainable_abc(), self.free_cams)
+        
+        # Reset this to not confuse viewer on which abc to select
+        del self.trainable_abc
+        self.trainable_abc = None
+        # while dpg.is_dearpygui_running():
+
+        #     # end step by displaying viewer
+        #     with torch.no_grad():
+        #         self.viewer_step()
+        #     with torch.no_grad():
+                
+        #         dpg.render_dearpygui_frame()
+        # # exit()
+        
     def __del__(self):
         dpg.destroy_context()
 
-    
     def track_cpu_gpu_usage(self, time):
         # Print GPU and CPU memory usage
         process = psutil.Process()
@@ -82,8 +250,6 @@ class GUIBase:
 
             if self.view_test == False:
                 if self.iteration <= self.final_iter:
-                    # Train the background seperately
-
                     self.train_step()
                         
                     self.iteration += 1
@@ -96,8 +262,7 @@ class GUIBase:
                 self.viewer_step()
                 dpg.render_dearpygui_frame()
         dpg.destroy_context()
-
-                    
+ 
     @torch.no_grad()
     def viewer_step(self):
         
@@ -109,12 +274,21 @@ class GUIBase:
             # print('freen', cam.R, cam.T)
 
             # cam.time = self.time
+            if self.trainable_abc is None:
+                abc = self.scene.ibl.abc
+                texture = self.scene.ibl[0]
+            else:
+                abc = self.trainable_abc()
+                texture = self.trainable_abc.background_texture
+            
             buffer_image = render(
                     cam,
-                    self.gaussians, 
+                    self.gaussians,
+                    abc,
+                    texture,
                     view_args={
                         "vis_mode":self.vis_mode 
-                    }
+                    },
             )
 
             try:
@@ -317,20 +491,60 @@ class GUIBase:
                 delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
                 cam = self.free_cams[self.current_cam_index]
 
-                zoom_scale = 0.95  # Smaller = faster zoom
+                zoom_scale = 0.1  # Smaller = faster zoom
 
                 # Scale FoV within limits
-                cam.FoVy *= zoom_scale if delta > 0 else 1 / zoom_scale
-                cam.FoVx *= zoom_scale if delta > 0 else 1 / zoom_scale
+                cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
+                cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
 
-                # Optional clamp to prevent weird values
-                cam.FoVy = np.clip(cam.FoVy, np.radians(10), np.radians(120))
-                cam.FoVx = np.clip(cam.FoVx, np.radians(10), np.radians(120))
                 cam.update_projections()
+            
+
+            def drag_callback(sender, app_data):
+                # app_data = (button, rel_x, rel_y)
+                # button: 0=left, 1=right, 2=middle
+                button, rel_x, rel_y = app_data
                 
+                if button != 0:  # only left drag
+                    return
+
+                cam = self.free_cams[self.current_cam_index]
+
+                # Sensitivity
+                yaw_speed = 0.0001
+                pitch_speed = 0.0001
+
+                # Convert mouse drag into yaw/pitch rotations
+                yaw = -rel_x * yaw_speed
+                pitch = rel_y * pitch_speed
+
+                # --- Rotation Matrices ---
+                Ry = np.array([
+                    [np.cos(yaw), 0, np.sin(yaw)],
+                    [0, 1, 0],
+                    [-np.sin(yaw), 0, np.cos(yaw)]
+                ])
+
+                Rx = np.array([
+                    [1, 0, 0],
+                    [0, np.cos(pitch), -np.sin(pitch)],
+                    [0, np.sin(pitch), np.cos(pitch)]
+                ])
+
+                R_drag = Rx @ Ry
+
+                R_c2w = cam.R
+
+                R_c2w_new = R_drag @ R_c2w
+                
+                cam.R = R_c2w_new
+                    
+                cam.update_projections()
+
             with dpg.handler_registry():
                 dpg.add_mouse_wheel_handler(callback=zoom_callback_fov)
-            
+                dpg.add_mouse_drag_handler(callback=drag_callback)
+                
         dpg.create_viewport(
             title=f"{self.runname}",
             width=self.W + 400,
@@ -361,8 +575,8 @@ class GUIBase:
 
         dpg.show_viewport()
         
-
-def get_in_view_dyn_mask(camera, xyz: torch.Tensor) -> torch.Tensor:
+from scipy.ndimage import distance_transform_edt
+def get_in_view_dyn_mask(camera, xyz, X, Y) -> torch.Tensor:
     device = xyz.device
     N = xyz.shape[0]
 
@@ -377,34 +591,102 @@ def get_in_view_dyn_mask(camera, xyz: torch.Tensor) -> torch.Tensor:
 
     # Visibility check
     in_front = proj_xyz[:, 2] > 0
-    in_ndc_bounds = (ndc[:, 0].abs() <= 1) & (ndc[:, 1].abs() <= 1) & (ndc[:, 2].abs() <= 1)
+    in_ndc_bounds = (
+        (ndc[:, 0].abs() <= 1) &
+        (ndc[:, 1].abs() <= 1) &
+        (ndc[:, 2].abs() <= 1)
+    )
     visible_mask = in_ndc_bounds & in_front
-    
+
     # Compute pixel coordinates
     px = (((ndc[:, 0] + 1) / 2) * camera.image_width).long()
-    py = (((ndc[:, 1] + 1) / 2) * camera.image_height).long()    # Init mask values
-    mask_values = torch.zeros(N, dtype=torch.bool, device=device)
+    py = (((ndc[:, 1] + 1) / 2) * camera.image_height).long()
 
     # Only sample pixels for visible points
     valid_idx = visible_mask.nonzero(as_tuple=True)[0]
+    px_valid = px[valid_idx].clamp(0, camera.image_width - 1)
+    py_valid = py[valid_idx].clamp(0, camera.image_height - 1)
+    mask = (1.-camera.scene_mask).to(device).squeeze(0)
 
-    if valid_idx.numel() > 0:
-        px_valid = px[valid_idx].clamp(0, camera.image_width - 1)
-        py_valid = py[valid_idx].clamp(0, camera.image_height - 1)
-        mask = camera.mask.to(device)
-        sampled_mask = mask[py_valid, px_valid]  # shape: [#valid]
-        mask_values[valid_idx] = sampled_mask.bool()
-    # import matplotlib.pyplot as plt
+    sampled_mask = mask[py_valid, px_valid].bool()
 
-    # # Assuming tensor is named `tensor_wh` with shape [W, H]
-    # # Convert to [H, W] for display (matplotlib expects H first)
-    # mask[py_valid, px_valid] = 0.5
-    # print(py_valid.shape)
+    H, W = camera.image_height, camera.image_width
+    xyz_img = torch.zeros((H, W, 3), device=device)
 
-    # tensor_hw = mask.cpu()  # If it's on GPU
-    # plt.imshow(tensor_hw, cmap='gray')
-    # plt.axis('off')
-    # plt.show()
-    # exit()
-    return mask_values.long()
+    # Assign xyz into pixels
+    px_final = px_valid[sampled_mask]
+    py_final = py_valid[sampled_mask]
+    xyz_vals = xyz[valid_idx][sampled_mask]
+    xyz_img[py_final, px_final] = xyz_vals
+    
+    
+    show = False
+    if show:
+        import matplotlib.pyplot as plt
+        # Convert to CPU numpy for visualization
+        img_np = xyz_img.detach().cpu().numpy()
 
+        # Normalize for display (independently per channel)
+        img_min = img_np.min(axis=(0, 1), keepdims=True)
+        img_max = img_np.max(axis=(0, 1), keepdims=True)
+        img_norm = (img_np - img_min) / (img_max - img_min + 1e-8)
+
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+        # Show normalized xyz image
+        ax[0].imshow(img_norm)
+        ax[0].set_title("Normalized xyz image")
+        ax[0].axis("off")
+
+        # Show XY indexing (scatter)
+        ax[1].imshow(img_norm)
+        ax[1].scatter(X, Y, s=3, c="red")
+        ax[1].set_title("With XY indexing")
+        ax[1].axis("off")
+
+        plt.show()
+        return None
+    
+    # --- Nearest-neighbor fill for empty pixels ---
+    xyz_np = xyz_img.cpu().numpy()   # [H, W, 3]
+    valid_mask = (xyz_np.sum(axis=-1) != 0)
+
+    # distance_transform_edt returns for each empty pixel the index of the nearest valid pixel
+    dist, indices = distance_transform_edt(~valid_mask,
+                                           return_indices=True)
+    filled = xyz_np[indices[0], indices[1]]  # nearest xyz per pixel
+
+    point = filled[Y, X, :]
+    
+    show = False
+    if show:
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111, projection="3d")
+
+        # Scatter all visible point cloud
+        ax.scatter(
+            xyz_vals[:, 0].cpu(),
+            xyz_vals[:, 1].cpu(),
+            xyz_vals[:, 2].cpu(),
+            s=1, c="blue", alpha=0.5, label="Point cloud"
+        )
+
+        # Scatter your selected points
+        ax.scatter(
+            point[ 0],
+            point[ 1],
+            point[ 2],
+            s=60, c="red", marker="o", label="Filtered XYZ"
+        )
+
+        ax.set_title("3D Point Cloud with Filtered Points")
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.legend()
+
+        plt.show()
+
+    return torch.from_numpy(point).float().to(device)

@@ -1,64 +1,82 @@
 from torch.utils.data import Dataset
 from scene.cameras import Camera
 import torch
-from PIL import Image
 
 from torchvision import transforms as T
-import numpy as np
 class FourDGSdataset(Dataset):
     def __init__(
         self,
         dataset,
-        args,
         dataset_type,
     ):
         self.dataset = dataset
-        self.args = args
-        self.dataset_type=dataset_type
-        self.transform = T.ToTensor()
+        self.dataset_type = dataset_type
         
+        self.loading_flags = {
+            "image":True,
+            "glass":False,
+            "scene":False,
+            "scene_occluded":False,
+            
+        }
         
     def __getitem__(self, index):
-        # TODO Create data loading function
-        R = self.dataset[index].R
-        T = self.dataset[index].T
-        FovX = self.dataset[index].FovX
-        FovY = self.dataset[index].FovY
-        time = self.dataset[index].time
-        # verts = self.dataset[index].verts
-        CLIP_feature = self.dataset[index].feature
-        
-        img = Image.open(self.dataset[index].image_path).convert("RGB")
-        # Downsample
+        cam = Camera(
+            R=self.dataset[index].R, T=self.dataset[index].T,
+            fx=self.dataset[index].fx, fy=self.dataset[index].fy,
+            cx=self.dataset[index].cx, cy=self.dataset[index].cy,
+            
+            width=self.dataset[index].width, height=self.dataset[index].height,
 
-        # new_w, new_h = 512, 288
-        # img = img.resize((new_w, new_h), Image.LANCZOS)
-        img = self.transform(img)
-        
-        background_image = None
-        # background_image = Image.open(self.dataset[index].image_path.replace('train', 'cropped').replace('jpg', 'png')).convert("RGB")
-        # background_image = background_image.resize((new_w, new_h), Image.LANCZOS)
-        # background_image = self.transform(background_image)
-        
-        mask = None
-        mask = Image.open(self.dataset[index].so_path).split()[-1] # get alpha chamme;
-        # mask = mask.resize((new_w, new_h), Image.LANCZOS)
-        mask = 1.- self.transform(mask)
-        
-        verts_ = []
+            time=self.dataset[index].time,
 
-        
-        return Camera(
-            colmap_id=index, 
-            R=R, T=T, FoVx=FovX, FoVy=FovY, 
-            image=img,
-            image_name=f"{index}", 
-            uid=index, data_device=torch.device("cuda"), time=time, 
-            mask=mask, mask_vertices=verts_,
-            background_image=background_image, 
-            depth=None,
-            feature=CLIP_feature
+            image_path=self.dataset[index].image_path,
+            sceneoccluded_path=self.dataset[index].so_path,
+            scene_path=self.dataset[index].s_path,
+            glass_path=self.dataset[index].g_path,
+            
+            uid=self.dataset[index].uid,
+            data_device=torch.device("cuda"), 
         )
+        
+        if self.loading_flags["image"]:
+            cam.load_image_from_flags("image")
+            
+        if self.loading_flags["scene"]:
+            cam.load_image_from_flags("scene")
+            
+        if self.loading_flags["glass"]:
+            cam.load_image_from_flags("glass")
+            
+        if self.loading_flags["scene_occluded"]:
+            cam.load_image_from_flags("scene_occluded")
+            
+        return cam
+
+    def __len__(self):
+        
+        return len(self.dataset)
+
+from PIL import Image
+class IBLBackround(Dataset):
+    def __init__(
+        self,
+        dataset,
+    ):
+        self.dataset = dataset
+        self.transform = T.ToTensor()
+        self.abc = torch.rand(3,3)
+        
+    def update_abc(self, abc):
+        self.abc = abc.detach()
+
+
+        
+    def __getitem__(self, index):
+        image = self.transform(
+            Image.open(self.dataset[index]).convert("RGB")
+        )
+        return image
 
     def __len__(self):
         

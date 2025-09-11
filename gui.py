@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from utils.timer import Timer
 
 
-from gaussian_renderer import render_batch, render, point_illumination_changes
+from gaussian_renderer import render_batch, render
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
@@ -35,6 +35,7 @@ class GUI(GUIBase):
                  expname,
                  skip_coarse,
                  view_test,
+                 bundle_adjust,
                  use_gui:bool=False
                  ):
 
@@ -80,7 +81,7 @@ class GUI(GUIBase):
         
         self.total_frames = scene.maxframes
         # Initialize DPG      
-        super().__init__(use_gui, scene, gaussians, self.expname, view_test)
+        super().__init__(use_gui, scene, gaussians, self.expname, view_test, bundle_adjust)
 
         # Initialize training
         self.timer = Timer()
@@ -90,6 +91,7 @@ class GUI(GUIBase):
         if skip_coarse:
             self.iteration = 1
         if ckpt_start: self.iteration = int(self.scene.loaded_iter) + 1
+        
     
     def init_taining(self):
         self.final_iter = self.opt.iterations
@@ -100,7 +102,7 @@ class GUI(GUIBase):
         # Load from fine model if it exists
 
         if self.checkpoint:
-            (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_fine_{self.checkpoint}.pth')
+            (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_{self.checkpoint}.pth')
             self.gaussians.restore(model_params, self.opt)
 
         # Set current iteration
@@ -113,14 +115,22 @@ class GUI(GUIBase):
         if self.view_test == False:
             self.random_loader  = True
 
-            print('Loading dataset')
-
-            self.viewpoint_stack = self.scene.getTrainCameras()
+            print('Loading dataset..')
+            # Set the data we want to use from this dataset
+            self.scene.train_camera.loading_flags["image"] = True
+            self.scene.train_camera.loading_flags["glass"] = False
+            self.scene.train_camera.loading_flags["scene_occluded"] = True
+            self.scene.train_camera.loading_flags["scene"] = False
+            
+            self.viewpoint_stack = [cam for cam in self.scene.train_camera]*1000
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                 num_workers=16, collate_fn=list))
-            
-        viewpoint_stack = [self.scene.getTrainCameras()[0]]
-        self.filter_3D_stack = viewpoint_stack.copy()
+        
+        self.scene.train_camera.loading_flags["image"] = False
+        self.scene.train_camera.loading_flags["glass"] = False
+        self.scene.train_camera.loading_flags["scene_occluded"] = False
+        self.scene.train_camera.loading_flags["scene"] = False
+        self.filter_3D_stack = [cam for idx, cam in enumerate(self.scene.train_camera) if idx < self.scene.num_cams]
     
     @property
     def get_batch_views(self, stack=None):
@@ -156,7 +166,7 @@ class GUI(GUIBase):
         
         L1 = render_batch(
             viewpoint_cams, 
-            self.gaussians 
+            self.gaussians,
         )
 
         # planeloss = self.gaussians.compute_regulation(
@@ -253,47 +263,6 @@ class GUI(GUIBase):
 
             dpg.render_dearpygui_frame()
 
-    def analyse_gaussian_illumination(self):
-
-        # Start recording step duration
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        cameras = self.scene.video_cameras        
-
-        buffer_image = point_illumination_changes(
-                cameras,
-                self.gaussians
-        )["render"]
-        
-        buffer_image = torch.nn.functional.interpolate(
-            buffer_image.unsqueeze(0),
-            size=(self.H,self.W),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)
-
-        buffer_image = (
-            buffer_image.permute(1, 2, 0)
-            .contiguous()
-            .clamp(0, 1)
-            .contiguous()
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        
-        while dpg.is_dearpygui_running():
-            
-
-            dpg.set_value(
-                "_texture", buffer_image
-            )  # buffer must be contiguous, else seg fault!
-            
-
-            dpg.render_dearpygui_frame()
-        dpg.destroy_context()
-
 import cv2
 def save_novel_views(pred, idx, name):
     pred = (pred.permute(1, 2, 0)
@@ -346,6 +315,9 @@ if __name__ == "__main__":
     parser.add_argument("--configs", type=str, default = "")
     parser.add_argument('--skip-coarse', type=str, default = None)
     parser.add_argument('--view-test', action='store_true', default=False)
+    
+    parser.add_argument('--bundle-adjust', action='store_true', default=False)
+
     parser.add_argument("--cam-config", type=str, default = "4")
     
     
@@ -379,6 +351,8 @@ if __name__ == "__main__":
         expname=name,
         skip_coarse=args.skip_coarse,
         view_test=args.view_test,
+        bundle_adjust=args.bundle_adjust,
+
         use_gui=True
     )
     gui.render()

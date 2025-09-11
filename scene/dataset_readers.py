@@ -14,24 +14,23 @@ from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 
 class CameraInfo(NamedTuple):
-    uid: int
     R: np.array
     T: np.array
-    c2w: np.array
-    FovY: np.array
-    FovX: np.array
-    image: np.array
-    verts: list
+    fx: np.array
+    fy: np.array
+    cx: np.array
+    cy: np.array
+
     image_path: str
     s_path: str
     so_path: str
     g_path: str
     b_path:str
-    image_name: str
+
+    uid: int    
     width: int
     height: int
     time : float
-    mask: np.array
     feature: torch.Tensor
    
 class SceneInfo(NamedTuple):
@@ -39,6 +38,7 @@ class SceneInfo(NamedTuple):
     train_cameras: list
     video_cameras: list
     nerf_normalization: dict
+    background_pth_ids:list
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -360,6 +360,7 @@ def readStudioCams(path, cams2world, focal, H, W, xyz):
 
     xyz = (global_T @ pts_h.T).T[:, :3]
     im_name = 'image_001.png'
+    background_pth_ids = []
     for idx, pose in enumerate(cams2world_aligned):
         image_path = os.path.join(path, cams[idx], im_name)
         so_path = os.path.join(path,'masks/scene_ocluded_masks', f'{cams[idx]}.png')
@@ -371,9 +372,56 @@ def readStudioCams(path, cams2world, focal, H, W, xyz):
         # pose = M @ pose @ M
 
         w2c = np.linalg.inv(pose)
-        R = w2c[:3,:3]  # rotation
+        R = w2c[:3,:3] # rotation
         T = w2c[:3,3] 
         
+        cx =  W / 2.0
+        cy = H / 2.0
+        fx = 0.5 * W / np.tan(fovx * 0.5)
+        fy = 0.5 * H / np.tan(fovy * 0.5)
+        
+        w = W
+        h = H
+
+        cam_infos.append(
+            CameraInfo(
+                R=R, T=T,
+                cx=cx, cy=cy, fx=fx, fy=fy,
+                width=w, height=h,
+                
+                image_path=image_path, 
+                so_path=so_path, s_path=s_path, g_path=g_path,b_path=b_path,
+                
+                uid=idx,
+                time = 0., feature=0.
+            )
+        )
+        
+        background_pth_ids.append(b_path)
+    
+    return cam_infos, xyz, background_pth_ids
+
+
+def readCorrectedStudioCams(path, cams2world, focal, H, W):    
+    cams = ['cam00','cam01', 'cam02', 'cam03']
+    print(f"Cam Intrinsics: {H} H x {W} W | {focal} (fovx, fovy)")
+    fovx = focal[0] #focal2fov( W)
+    fovy = focal[1] #focal2fov(focal[1], H)
+    cam_infos = []
+
+    im_name = 'image_001.png'
+    for idx, pose in enumerate(cams2world):
+        image_path = os.path.join(path, cams[idx], im_name)
+        so_path = os.path.join(path,'masks/scene_ocluded_masks', f'{cams[idx]}.png')
+        s_path = os.path.join(path,'masks/scene_masks', f'{cams[idx]}.png')
+        g_path = os.path.join(path,'masks/glass_masks', f'{cams[idx]}.png')
+        b_path = os.path.join(path,'cropped_images', im_name)
+
+        # M = np.diag([1, -1, -1, 1]).astype(np.float32)
+        # pose = M @ pose @ M
+        w2c = np.linalg.inv(pose)
+        R = w2c[:3,:3]  # rotation
+        T = w2c[:3,3] 
 
         FovY = fovy 
         FovX = fovx
@@ -385,12 +433,11 @@ def readStudioCams(path, cams2world, focal, H, W, xyz):
                         so_path=so_path, s_path=s_path, g_path=g_path,b_path=b_path,
                         time = 0., mask=None, verts=None, feature=0.))
     
-    return cam_infos, xyz
+    return cam_infos
 
 def readHomeStudioInfo(path):
     print("Reading Training Data")
     meta_pth = os.path.join(path, 'sfm_meta', 'info.json')
-    
     with open(meta_pth, "r") as f:
         meta = json.load(f)
     
@@ -405,11 +452,9 @@ def readHomeStudioInfo(path):
     pcd_path = os.path.join(path, 'sfm_meta', 'pointcloud.npy')
     pcd = np.load(pcd_path, allow_pickle=True).item()
     pts = pcd["points"]
+    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts)
     
-    train_cams,pts = readStudioCams(path, c2w, focal, H, W, pts)
     nerf_normalization = getNerfppNorm(train_cams)
-
-    # Get point cloud data
     
     col = pcd["colors"]
     pcd = BasicPointCloud(points=pts, colors=col, normals=np.zeros((pts.shape[0], 3)))
@@ -420,6 +465,47 @@ def readHomeStudioInfo(path):
         train_cameras=train_cams,
         video_cameras=train_cams,
         nerf_normalization=nerf_normalization,
+        background_pth_ids=background_pth_ids
+    )
+    return scene_info
+
+
+
+def readHomeStudioInfoCorrected(path):
+    print("Reading Training Data")
+
+    meta_pth = os.path.join(path, 'sfm_meta', 'info_corrected.json')
+
+    with open(meta_pth, "r") as f:
+        meta = json.load(f)
+    
+    # Get the camera pose data
+    focal = meta['focals'][0] # fovx, fovy
+    W,H = meta['imsize'][0][0], meta['imsize'][0][1]
+    poses = meta['c2w']
+    abc = meta['abc'] # background image vertices
+    
+    c2w = []
+    for pose in poses:
+        c2w.append(np.array(pose))
+
+    train_cams = readCorrectedStudioCams(path, c2w, focal, H, W)
+
+    nerf_normalization = getNerfppNorm(train_cams)
+    
+    import pickle
+    with open(os.path.join(path, 'sfm_meta/pointcloud_corrected.json'), "rb") as f:
+        pcd = pickle.load(f)
+    
+    # BasicPointCloud(points=pts, colors=col, normals=np.zeros((pts.shape[0], 3)))
+
+
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_cams,
+        video_cameras=train_cams,
+        nerf_normalization=nerf_normalization,
+        abc=abc
     )
     return scene_info
 

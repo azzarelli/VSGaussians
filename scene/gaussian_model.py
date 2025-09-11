@@ -190,11 +190,15 @@ class GaussianModel:
         xyz = self.get_xyz
         distance = torch.ones((xyz.shape[0]), device=xyz.device) * 100000.0
         valid_points = torch.zeros((xyz.shape[0]), device=xyz.device, dtype=torch.bool)
+
+        
         
         # we should use the focal length of the highest resolution camera
         focal_length = 0.
         for camera in cameras:
-
+            INTR = camera.intrinsics
+            fx,fy,cx,cy = INTR[0,0], INTR[1,1], INTR[0,2], INTR[1,2]
+            
             # transform points to camera space
             R = torch.tensor(camera.R, device=xyz.device, dtype=torch.float32)
             T = torch.tensor(camera.T, device=xyz.device, dtype=torch.float32)
@@ -208,8 +212,8 @@ class GaussianModel:
             x, y, z = xyz_cam[:, 0], xyz_cam[:, 1], xyz_cam[:, 2]
             z = torch.clamp(z, min=0.001)
             
-            x = x / z * camera.focal_x + camera.image_width / 2.0
-            y = y / z * camera.focal_y + camera.image_height / 2.0
+            x = x / z * fx + cx
+            y = y / z * fy + cy
             
             # in_screen = torch.logical_and(torch.logical_and(x >= 0, x < camera.image_width), torch.logical_and(y >= 0, y < camera.image_height))
             
@@ -222,8 +226,8 @@ class GaussianModel:
             # distance[valid] = torch.min(distance[valid], xyz_to_cam[valid])
             distance[valid] = torch.min(distance[valid], z[valid])
             valid_points = torch.logical_or(valid_points, valid)
-            if focal_length < camera.focal_x:
-                focal_length = camera.focal_x
+            if focal_length < camera.fx:
+                focal_length = camera.fx
         
         distance[~valid_points] = distance[valid_points].max()
         
@@ -248,7 +252,7 @@ class GaussianModel:
 
         dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
 
-        scales = torch.log(torch.sqrt(dist2)*0.0 + 0.0005)[...,None].repeat(1, 3)
+        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
 
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
