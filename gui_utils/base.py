@@ -22,7 +22,7 @@ class GUIBase:
         self.view_test = view_test
         
         # Set the width and height of the expected image
-        self.W, self.H = self.scene.getTrainCameras()[0].image_width, self.scene.getTrainCameras()[0].image_height
+        self.W, self.H = self.scene.train_camera[0].width, self.scene.train_camera[0].height
 
         if self.H > 1200 and self.scene != "dynerf":
             self.W = self.W//2
@@ -34,6 +34,7 @@ class GUIBase:
         self.time = 0.
         self.show_radius = 30.
         self.vis_mode = 'render'
+        self.show_mask = 'none'
         self.show_dynamic = 0.
         self.w_thresh = 0.
         self.h_thresh = 0.
@@ -49,7 +50,7 @@ class GUIBase:
         self.full_opacity = False
         
         self.N_pseudo = 3 
-        self.free_cams = [self.scene.getTrainCameras()[idx] for idx in range(len(self.scene.getTrainCameras()))]
+        self.free_cams = self.scene.ba_camera
         # self.free_cams = [self.scene.get_pseudo_view() for i in range(self.N_pseudo)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
         
         self.current_cam_index = 0
@@ -74,17 +75,16 @@ class GUIBase:
         import cv2
 
         # Initialize the shared intrinsics
-        initialize_intrinsics = True
+        ba_cameras_flag = True
 
+        # Initialize dataset parameters for online image loading
+        self.scene.ba_camera.loading_flags["image"] = True
+        self.scene.ba_camera.loading_flags["glass"] = False
+        self.scene.ba_camera.loading_flags["scene_occluded"] = False
+        self.scene.ba_camera.loading_flags["scene"] = True
 
-        # Initialize the Trainable c2w parameters
-        self.scene.train_camera.loading_flags["image"] = True
-        self.scene.train_camera.loading_flags["glass"] = False
-        self.scene.train_camera.loading_flags["scene_occluded"] = False
-        self.scene.train_camera.loading_flags["scene"] = True
-        initial_dataset = self.scene.train_camera
         trainable_c2w = []
-        for cam in initial_dataset:
+        for cam in self.scene.ba_camera:
             trainable_c2w.append(TrainCam(cam.world_view_transform.inverse().transpose(0,1)))
 
         #####
@@ -94,7 +94,8 @@ class GUIBase:
         abcd = []
         pcd = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
         abcd = []
-        for cam in initial_dataset:
+        initialize_intrinsics = True
+        for cam in self.scene.ba_camera:
             # Initilize the intrinsics using the first cam's parameters
             if initialize_intrinsics:
                 trainable_intrinsics = SharedIntrinsics(
@@ -140,50 +141,59 @@ class GUIBase:
         
         # TODO: load cam background image
         background_texture = self.scene.ibl[0].cuda()
-        self.trainable_abc = TrainABC(abcd, background_texture.shape[1], background_texture.shape[2], background_texture)
-        
-        lr = 1e-3
+        self.trainable_abc = TrainABC(abcd, background_texture.shape[1], background_texture.shape[2], background_texture=background_texture)
+
+        lr = 1e-2
         intr_optim = torch.optim.Adam(trainable_intrinsics.parameters(), lr=lr)
         cam_optims = [torch.optim.Adam(m.parameters(), lr=lr) for m in trainable_c2w]
         suf_optim = torch.optim.Adam(self.trainable_abc.parameters(), lr=lr)
 
         # Re-initialize dataset to get different masks:
-        self.scene.train_camera.loading_flags["image"] = True
-        self.scene.train_camera.loading_flags["glass"] = False
-        self.scene.train_camera.loading_flags["scene_occluded"] = True
-        self.scene.train_camera.loading_flags["scene"] = False
-        initial_dataset = self.scene.train_camera
-        
-        TRAIN=False
+
+        TRAIN=True
         if TRAIN:
-            max_iterations = 10
+            self.stage = "ba"
+            max_iterations = 1000
             for iteration in range(max_iterations):
-                
-                intr_optim.zero_grad()
                 suf_optim.zero_grad()
-                for opt in cam_optims:
-                    opt.zero_grad()
+                if ba_cameras_flag:
+                    intr_optim.zero_grad()
+                    for opt in cam_optims:
+                        opt.zero_grad()
                 loss = 0.
                 
-                
-                for traincam, cam in zip(trainable_c2w, initial_dataset):
+                self.scene.ba_camera.loading_flags["image"] = True
+                self.scene.ba_camera.loading_flags["glass"] = False
+                self.scene.ba_camera.loading_flags["scene_occluded"] = True
+                self.scene.ba_camera.loading_flags["scene"] = False
+                for traincam, cam in zip(trainable_c2w, self.scene.ba_camera):
                     
+                    if ba_cameras_flag:
+                        H,W, fx,fy,cx,cy = trainable_intrinsics()
+                        c2w = traincam()
+                    else:
+                        with torch.no_grad():
+                            H,W, fx,fy,cx,cy = trainable_intrinsics()
+                            c2w = traincam()
 
-                    H,W, fx,fy,cx,cy = trainable_intrinsics()
                     abc = self.trainable_abc()
-                    c2w = traincam()
                     
                     origin,direction = cam.generate_rays(c2w, H, W, fx,fy,cx,cy)
 
                     sampled = cam.surface_sample(origin, direction, abc, background_texture)
                     
-                    gt_img = cam.image.cuda() * 1. - cam.sceneoccluded_mask.cuda()
-                    loss += ((gt_img - sampled)**2).mean()
+                    mask = (1. - cam.sceneoccluded_mask.cuda()).bool().repeat(3,1,1)
+                    gt_img = mask * sampled #cam.image.cuda() 
+                    
+                    loss += ((gt_img - sampled)).abs().mean()*1.
+                    loss += (((cam.image.cuda()*mask) - sampled)).abs().mean()
+                
                 loss.backward()
-                intr_optim.step()
                 suf_optim.step()
-                for opt in cam_optims:
-                    opt.step()
+                if ba_cameras_flag:
+                    intr_optim.step()
+                    for opt in cam_optims:
+                        opt.step()
                 
                 with torch.no_grad():
                     if iteration % 2 == 0:
@@ -192,42 +202,74 @@ class GUIBase:
                     dpg.set_value("_log_loss", f"Loss: {loss.item()}")
 
                     dpg.render_dearpygui_frame()
+
+        # Decompose the camera intrindixs to update the dataset
+        if ba_cameras_flag:               
+            _, _, fx,fy,cx,cy = trainable_intrinsics()
+            fx = fx.detach().cpu().item()
+            fy = fy.detach().cpu().item()
+            cx = cx.detach().cpu().item()
+            cy = cy.detach().cpu().item()
+        
+        from scene.dataset_readers import CameraInfo
+        new_training_data = []
+        cam_idxs = [i for j in range(self.scene.maxframes) for i in range(self.scene.num_cams)]
+        for idx, cam in enumerate(self.scene.train_camera):
+            if ba_cameras_flag:
+                c2w = trainable_c2w[cam_idxs[idx]]().detach().cpu().numpy()
+                w2c = np.linalg.inv(c2w)
+                # R = cam.R #w2c[:3, :3]
+                # T = cam.T #w2c[:3, 3]
+                R = w2c[:3, :3]
+                T = w2c[:3, 3]
+
+                new_training_data.append(CameraInfo(
+                    R=R, T=T,
+                    cx=cx, cy=cy, fx=fx, fy=fy,
+                    width=cam.width, height=cam.height,
                     
-        _, _, fx,fy,cx,cy = trainable_intrinsics()
-        fx = fx.detach().cpu().item()
-        fy = fy.detach().cpu().item()
-        cx = cx.detach().cpu().item()
-        cy = cy.detach().cpu().item()
-        
-        final_cams = [] #[self.scene.getTrainCameras()[idx] for idx in range(len(self.scene.getTrainCameras()))]
-        for traincam, cam in zip(trainable_c2w, initial_dataset):
-            cam.fx = fx
-            cam.fy = fy
-            cam.cx = cx
-            cam.cy = cy
-            c2w = traincam().detach().cpu().numpy()
-            w2c = np.linalg.inv(c2w)
-            cam.R = w2c[:3, :3]
-            cam.T = w2c[:3, 3]
-            cam.update_projections()
-            final_cams.append(cam)
-        
-        self.free_cams = final_cams
+                    image_path=cam.image_path, 
+                    so_path=cam.so_path, s_path=cam.s_path, g_path=cam.g_path,b_path=cam.b_path,
+                    
+                    uid=cam.uid,
+                    time = cam.time, feature=cam.feature
+                ))
+            
         self.current_cam_index = 0
-        self.scene.update_scene(self.trainable_abc(), self.free_cams)
-        
+        self.scene.update_scene(self.trainable_abc(), new_training_data)
+        self.free_cams =  [self.scene.test_camera[0]] + [self.scene.ba_camera[idx] for idx in range(self.scene.num_cams)]
+
         # Reset this to not confuse viewer on which abc to select
         del self.trainable_abc
         self.trainable_abc = None
-        # while dpg.is_dearpygui_running():
+        
+        # Finally clean up the point cloud to remove screen-gaussians based on screne-occluded mask
+        pcd = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
+        pcd_update_mask = None
+        for cam in self.scene.ba_camera:
+            
+            pcd_mask = remove_screen_points(cam, pcd)
+            pcd_update_mask = pcd_update_mask+pcd_mask if pcd_update_mask != None else pcd_mask
 
-        #     # end step by displaying viewer
-        #     with torch.no_grad():
-        #         self.viewer_step()
-        #     with torch.no_grad():
-                
-        #         dpg.render_dearpygui_frame()
-        # # exit()
+        # pcd_update_mask = (pcd_update_mask == 0).int()
+        
+        pcd_update_mask = pcd_update_mask.cpu()
+        from utils.graphics_utils import BasicPointCloud
+        if self.scene.loaded_iter == None:
+            self.scene.point_cloud = BasicPointCloud(
+                points  = torch.from_numpy(self.scene.point_cloud.points)[pcd_update_mask].numpy(),
+                colors  = torch.from_numpy(self.scene.point_cloud.colors)[pcd_update_mask].numpy(),
+                normals = torch.from_numpy(self.scene.point_cloud.normals)[pcd_update_mask].numpy()
+            )
+            self.scene.gaussians.create_from_pcd(self.scene.point_cloud) # TODO: configure
+        self.stage = "coarse"
+        DEBUG = False
+        if DEBUG:
+            while dpg.is_dearpygui_running():
+                with torch.no_grad():
+                    self.viewer_step()                    
+                    dpg.render_dearpygui_frame()
+            exit()
         
     def __del__(self):
         dpg.destroy_context()
@@ -269,6 +311,10 @@ class GUIBase:
         if self.switch_off_viewer == False:
             # cam = self.scene.video_cameras[0]
             # print(cam.R, cam.T)
+            self.scene.ba_camera.loading_flags["image"] = True
+            self.scene.ba_camera.loading_flags["glass"] = False
+            self.scene.ba_camera.loading_flags["scene_occluded"] = True if self.show_mask == "occ" else False
+            self.scene.ba_camera.loading_flags["scene"] = True if self.show_mask == "scene" else False
             
             cam = self.free_cams[self.current_cam_index]
             # print('freen', cam.R, cam.T)
@@ -276,7 +322,7 @@ class GUIBase:
             # cam.time = self.time
             if self.trainable_abc is None:
                 abc = self.scene.ibl.abc
-                texture = self.scene.ibl[0]
+                texture = self.scene.ibl[cam.uid]
             else:
                 abc = self.trainable_abc()
                 texture = self.trainable_abc.background_texture
@@ -287,7 +333,8 @@ class GUIBase:
                     abc,
                     texture,
                     view_args={
-                        "vis_mode":self.vis_mode 
+                        "vis_mode":self.vis_mode,
+                        "stage":self.stage
                     },
             )
 
@@ -306,7 +353,18 @@ class GUIBase:
                 mode="bilinear",
                 align_corners=False,
             ).squeeze(0)
-
+            
+            try:
+                if self.show_mask == 'occ':
+                    mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+                elif self.show_mask == 'scene':
+                    mask = cam.scene_mask.squeeze(0).cuda()
+                else:
+                    mask = 0.
+                buffer_image[0] += mask*0.5
+            except:
+                pass
+            
             self.buffer_image = (
                 buffer_image.permute(1, 2, 0)
                 .contiguous()
@@ -324,12 +382,7 @@ class GUIBase:
         )  # buffer must be contiguous, else seg fault!
         
         # Add _log_view_camera
-        if self.current_cam_index < self.N_pseudo:
-            dpg.set_value("_log_view_camera", f"Random Novel Views")
-        elif self.current_cam_index == self.N_pseudo:
-            dpg.set_value("_log_view_camera", f"Test Views")
-        else:
-            dpg.set_value("_log_view_camera", f"Training Views")
+        dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")
 
     def save_scene(self):
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))
@@ -439,6 +492,18 @@ class GUIBase:
                     dpg.add_text("no data", tag="_log_view_camera")
                     dpg.add_button(label="Next cam", callback=callback_toggle_next_cam)
 
+                def callback_toggle_scene_mask(sender):
+                    self.show_mask = 'scene'
+                def callback_toggle_sceneocc_mask(sender):
+                    self.show_mask = 'occ'
+                def callback_toggle_no_mask(sender):
+                    self.show_mask = 'none'
+                    
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="No Mask", callback=callback_toggle_no_mask)
+                    dpg.add_button(label="Scene Mask", callback=callback_toggle_scene_mask)
+                    dpg.add_button(label="Occlu Mask", callback=callback_toggle_sceneocc_mask)
+                    
                 
                 def callback_toggle_show_target(sender):
                     self.show_scene_target = 1
@@ -464,16 +529,23 @@ class GUIBase:
                     self.vis_mode = 'D'
                 def callback_toggle_show_edepth(sender):
                     self.vis_mode = 'ED'
+                def callback_toggle_show_2dgsdepth(sender):
+                    self.vis_mode = '2D'
                 def callback_toggle_show_norms(sender):
-                    self.vis_mode = 'norms'
+                    self.vis_mode = 'normals'
                 def callback_toggle_show_alpha(sender):
                     self.vis_mode = 'alpha'
+                    
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
-                    dpg.add_button(label="D", callback=callback_toggle_show_depth)
-                    dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
                     dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
+                
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="D", callback=callback_toggle_show_depth)
+                    dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
+                    dpg.add_button(label="2D", callback=callback_toggle_show_2dgsdepth)
+
             
                 
                 def callback_speed_control(sender):
@@ -491,7 +563,7 @@ class GUIBase:
                 delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
                 cam = self.free_cams[self.current_cam_index]
 
-                zoom_scale = 0.1  # Smaller = faster zoom
+                zoom_scale = 0.01  # Smaller = faster zoom
 
                 # Scale FoV within limits
                 cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
@@ -690,3 +762,45 @@ def get_in_view_dyn_mask(camera, xyz, X, Y) -> torch.Tensor:
         plt.show()
 
     return torch.from_numpy(point).float().to(device)
+
+
+def remove_screen_points(camera, xyz):
+    device = xyz.device
+    N = xyz.shape[0]
+
+    # Convert to homogeneous coordinates
+    xyz_h = torch.cat([xyz, torch.ones((N, 1), device=device)], dim=-1)  # (N, 4)
+
+    # Apply full projection (world → clip space)
+    proj_xyz = xyz_h @ camera.full_proj_transform.to(device)  # (N, 4)
+
+    # Homogeneous divide to get NDC coordinates
+    ndc = proj_xyz[:, :3] / proj_xyz[:, 3:4]  # (N, 3)
+
+    in_front = proj_xyz[:, 2] > 0
+    in_ndc_bounds = (
+        (ndc[:, 0].abs() <= 1) &
+        (ndc[:, 1].abs() <= 1) &
+        (ndc[:, 2].abs() <= 1)
+    )
+    visible_mask = in_front & in_ndc_bounds
+
+    # Pixel coordinates for all points (will clamp to bounds)
+    px = (((ndc[:, 0] + 1) / 2) * camera.image_width).long().clamp(0, camera.image_width - 1)
+    py = (((ndc[:, 1] + 1) / 2) * camera.image_height).long().clamp(0, camera.image_height - 1)
+
+    # Scene mask (1 = free, 0 = masked/occluded)
+    mask_img = (camera.sceneoccluded_mask).to(device).squeeze(0)
+
+    # Start with all points marked False (not removed)
+    remove_mask = torch.zeros(N, dtype=torch.bool, device=device)
+
+    # Only check points that are visible
+    sampled_mask = mask_img[py[visible_mask], px[visible_mask]].bool()
+
+    # Mark visible points inside the mask for removal
+    remove_mask[visible_mask] = sampled_mask
+
+    return remove_mask
+    
+

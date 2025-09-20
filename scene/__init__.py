@@ -34,8 +34,8 @@ class Scene:
                 self.loaded_iter = load_iteration
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
-        max_frames = 4
-        num_cams = 4
+        max_frames = 100
+        num_cams = 3
         scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path)
         dataset_type="condense"
         
@@ -44,7 +44,10 @@ class Scene:
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
         
-        self.train_camera = FourDGSdataset(scene_info.train_cameras, dataset_type)
+        self.train_camera = scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
+        self.test_camera = FourDGSdataset(scene_info.test_cameras, dataset_type)
+        self.ba_camera = FourDGSdataset(scene_info.ba_cameras, dataset_type)
+
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
         self.ibl = IBLBackround(scene_info.background_pth_ids)
         
@@ -62,8 +65,8 @@ class Scene:
                                                     "iteration_" + str(self.loaded_iter),
                                                 ))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud) # TODO: configure
-
+            self.gaussians.create_from_pcd(self.point_cloud)
+            
     def save(self, iteration, stage):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
@@ -74,36 +77,10 @@ class Scene:
         #   so that the c2w and intrinsics get updated for training
         # Update training camera parameters and scene abc
         self.ibl.update_abc(abc)
-        
-        from scene.dataset_readers import CameraInfo
-        
-        caminfo = []
-        for cam in cams:
-            caminfo.append(
-                
-                CameraInfo(
-                    uid=cam.uid,
-                    R = cam.R,
-                    T = cam.T,
-                    fx=cam.fx, fy=cam.fy,
-                    cx=cam.cx, cy=cam.cy,
-                    height=cam.image_height, width=cam.image_width,
-                    
-                    image_path=cam.image_path,
-                    
-                    s_path=cam.scene_path,
-                    so_path=cam.sceneoccluded_path,
-                    g_path=cam.glass_path,
-                    b_path=None,
-
-
-                    time=cam.time,
-                    feature=None
-                    
-                )
-            )
-        self.train_camera = FourDGSdataset(caminfo, self.dataset_type)
-        
+        if cams!= []:
+            self.train_camera = FourDGSdataset(cams, self.dataset_type)
+        else:
+            self.train_camera = FourDGSdataset(self.train_camera, self.dataset_type)
 
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

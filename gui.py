@@ -161,10 +161,8 @@ class GUI(GUIBase):
         # print("Dupelicating Dynamics")
         # self.gaussians.oneupSHdegree() #dynamic_dupelication()
         # self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
-        
-        L1 = torch.tensor(0.).cuda()
-        
-        L1 = render_batch(
+                
+        L1, dL1 = render_batch(
             viewpoint_cams, 
             self.gaussians,
         )
@@ -174,14 +172,15 @@ class GUI(GUIBase):
         #     self.hyperparams.minview_weight
         # )
 
-        loss = L1 # +  planeloss
+        loss = L1 + dL1 # +  planeloss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     dpg.set_value("_log_loss", f"Loss: {L1.item()}")
-                    dpg.set_value("_log_depth", f"Number points: {self.gaussians._xyz.shape[0]} ")
+                    # dpg.set_value("_log_depth", f"Depth Loss: {dL1.item()}")
+                    dpg.set_value("_log_points", f"Number points: {self.gaussians._xyz.shape[0]} ")
 
             if self.iteration % 2000 == 0:
                 self.track_cpu_gpu_usage(0.1)

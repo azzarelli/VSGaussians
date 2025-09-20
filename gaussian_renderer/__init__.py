@@ -2,7 +2,7 @@ import torch
 import math
 import torch.nn.functional as F
 
-from gsplat.rendering import rasterization
+from gsplat.rendering import rasterization, rasterization_2dgs
 
 
 
@@ -19,43 +19,57 @@ def process_Gaussians(pc, time):
     colors = pc.get_features
     opacity = pc.get_opacity
     try:
-        scales = pc.get_scaling_with_3D_filter
+        scales = pc.get_scaling #_with_3D_filter
         rotations = pc._rotation
         
 
-        # means3D, rotations, opacity, colors, extras = pc._deformation(
-        #     point=means3D, 
-        #     rotations=rotations,
-        #     scales=scales,
-        #     times_sel=feature, 
-        #     h_emb=opacity,
-        #     shs=colors,
-        # )
+        means3D, rotations, opacity, colors, extras = pc._deformation(
+            point=means3D, 
+            rotations=rotations,
+            scales=scales,
+            times_sel=time, 
+            h_emb=opacity,
+            shs=colors,
+        )
         
-        opacity = pc.get_fine_opacity_with_3D_filter(opacity[:,0].unsqueeze(-1))
+        opacity = torch.sigmoid(opacity[:,0]).unsqueeze(-1) # pc.get_fine_opacity_with_3D_filter(opacity[:,0].unsqueeze(-1))
         rotations = pc.rotation_activation(rotations)
-        return means3D, rotations, opacity, colors, scales
     except:
-        scales = torch.zeros_like(means3D, device=means3D.device) + 0.001
-        opacity = torch.ones_like(means3D[:,0].unsqueeze(-1), device=means3D.device)
+        scales = torch.zeros_like(means3D, device=means3D.device) + 0.0001
+        opacity = torch.ones_like(means3D, device=means3D.device)[:,0].unsqueeze(-1) * 0.5
         
         rotations = pc.rotation_activation(pc._rotation)
-        return means3D, rotations, opacity, colors, scales
+        
+    return means3D, rotations, opacity, colors, scales
  
 def rendering_pass(means3D, rotation, scales, opacity, colors, cam, sh_deg=3, mode="RGB"):
-    return rasterization(
+    if mode in ['normals', '2D']:
+        gmode = 'RGB'
+    else:
+        gmode = mode
+        
+    colors, alphas, normals, surf_normals, distort, median_depth, meta = rasterization_2dgs(
+    # colors, alphas, meta = rasterization(
         means3D, rotation, scales, opacity.squeeze(-1), colors,
         cam.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
         cam.intrinsics.unsqueeze(0).cuda(),
         cam.image_width, 
         cam.image_height,
         
-        render_mode=mode,
-        rasterize_mode='antialiased',
-        eps2d=0.1,
+        render_mode=gmode,
+        # rasterize_mode='antialiased',
+        # eps2d=0.1,
         sh_degree=sh_deg #pc.active_sh_degree
     )
+    
+    if mode == 'normals':
+        colors = normals
+    elif mode == '2D':
+        colors = median_depth
+        
+    return colors, alphas, (normals, surf_normals, distort, median_depth, meta)
 
+@torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None):
     """
     Render the scene for viewing
@@ -64,12 +78,18 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
 
     time = torch.tensor(viewpoint_camera.time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1)
     means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
-    
+    if view_args["stage"] == "ba":
+        scales *= 0.005
+
     # Set arguments depending on type of viewing
     if view_args['vis_mode'] in 'render':
         mode = "RGB"
     elif view_args['vis_mode'] == 'alpha':
         mode = "RGB"
+    elif view_args['vis_mode'] == 'normals':
+        mode = "normals"
+    elif view_args['vis_mode'] == '2D':
+        mode = "2D"
     elif view_args['vis_mode'] == 'D':
         mode = "D"
     elif view_args['vis_mode'] == 'ED':
@@ -81,6 +101,9 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         pc.active_sh_degree,
         mode=mode
     )
+    
+    if view_args['vis_mode'] == 'normals' or view_args['vis_mode'] == '2D':
+        view_args['vis_mode'] = 'render'
     
     # Process image
     if view_args['vis_mode'] in 'render':
@@ -114,7 +137,8 @@ def render_batch(viewpoint_cams, pc):
     """Training renderer the scene"""
     
     L1 = 0.
-
+    dL1 = 0.
+    
     time = torch.tensor(viewpoint_cams[0].time).to(pc._xyz.device).repeat(pc._xyz.shape[0], 1).detach()
     for idx, viewpoint_camera in enumerate(viewpoint_cams):
         time = time*0. +viewpoint_camera.time
@@ -122,12 +146,18 @@ def render_batch(viewpoint_cams, pc):
         means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
                         
         # Set up rasterization configuration
-        rgb, _, _ = rendering_pass(means3D, rotation, scales, opacity, colors, viewpoint_camera, pc.active_sh_degree)
+        rgb, _, meta = rendering_pass(means3D, rotation, scales, opacity, colors, viewpoint_camera, pc.active_sh_degree)
         rgb = rgb.squeeze(0).permute(2,0,1)
         gt_img = viewpoint_camera.image.cuda() *(viewpoint_camera.sceneoccluded_mask.cuda())
         
         
         L1 += l1_loss(rgb, gt_img)
+        
+        # rgb, _, meta = rendering_pass(means3D, rotation, scales, opacity, colors, viewpoint_camera, pc.active_sh_degree, mode='D')
+        # depth = rgb.squeeze(0).permute(2,0,1)
+
+        # pseudo_D = depth *(viewpoint_camera.sceneoccluded_mask.cuda())
+        # dL1 += l1_loss(pseudo_D, depth)
            
-    return L1
+    return L1, dL1
 
