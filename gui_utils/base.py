@@ -4,7 +4,7 @@ import os
 import copy
 import psutil
 import torch
-from gaussian_renderer import render
+from gaussian_renderer import render, render_triangles
 from tqdm import tqdm
 
 class GUIBase:
@@ -50,7 +50,7 @@ class GUIBase:
         self.full_opacity = False
         
         self.N_pseudo = 3 
-        self.free_cams = self.scene.ba_camera
+        self.free_cams = self.scene.ba_camera + [self.scene.test_camera[0]] 
         # self.free_cams = [self.scene.get_pseudo_view() for i in range(self.N_pseudo)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
         
         self.current_cam_index = 0
@@ -58,7 +58,7 @@ class GUIBase:
         
         self.trainable_abc = None
         
-        if bundle_adjust:
+        if bundle_adjust and view_test == False :
             self.run_bundle_adjustment()
         elif self.gui:
             print('DPG loading ...')
@@ -75,7 +75,7 @@ class GUIBase:
         import cv2
 
         # Initialize the shared intrinsics
-        ba_cameras_flag = True
+        ba_cameras_flag = False
 
         # Initialize dataset parameters for online image loading
         self.scene.ba_camera.loading_flags["image"] = True
@@ -153,7 +153,7 @@ class GUIBase:
         TRAIN=True
         if TRAIN:
             self.stage = "ba"
-            max_iterations = 1000
+            max_iterations = 10
             for iteration in range(max_iterations):
                 suf_optim.zero_grad()
                 if ba_cameras_flag:
@@ -261,8 +261,11 @@ class GUIBase:
                 colors  = torch.from_numpy(self.scene.point_cloud.colors)[pcd_update_mask].numpy(),
                 normals = torch.from_numpy(self.scene.point_cloud.normals)[pcd_update_mask].numpy()
             )
-            self.scene.gaussians.create_from_pcd(self.scene.point_cloud) # TODO: configure
+            self.scene.gaussians.create_from_pcd(self.scene.point_cloud, self.opt) # TODO: configure
         self.stage = "coarse"
+        
+        
+        # Display 
         DEBUG = False
         if DEBUG:
             while dpg.is_dearpygui_running():
@@ -287,19 +290,40 @@ class GUIBase:
     
     def render(self):
         tested = True
-        self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
         while dpg.is_dearpygui_running():
 
             if self.view_test == False:
+                # Start recording step duration
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                self.iter_start.record()
+
+
                 if self.iteration <= self.final_iter:
                     self.train_step()
-                        
                     self.iteration += 1
+
 
                 if self.iteration > self.final_iter:
                     self.stage = 'done'
                     dpg.stop_dearpygui()
+                
+                
+            self.iter_end.record()
+            
+            with torch.no_grad():
+                self.timer.pause() # log and save
+            
+                torch.cuda.synchronize()
+                if self.iteration % 1000 == 0:
+                    self.track_cpu_gpu_usage(0.1)
                     
+                # Save scene when at the saving iteration
+                if (self.iteration in self.saving_iterations) or (self.iteration == self.final_iter-1):
+                    self.save_scene()
+
+                self.timer.start()
+                
             with torch.no_grad():
                 self.viewer_step()
                 dpg.render_dearpygui_frame()
@@ -309,72 +333,85 @@ class GUIBase:
     def viewer_step(self):
         
         if self.switch_off_viewer == False:
-            # cam = self.scene.video_cameras[0]
-            # print(cam.R, cam.T)
             self.scene.ba_camera.loading_flags["image"] = True
             self.scene.ba_camera.loading_flags["glass"] = False
             self.scene.ba_camera.loading_flags["scene_occluded"] = True if self.show_mask == "occ" else False
             self.scene.ba_camera.loading_flags["scene"] = True if self.show_mask == "scene" else False
             
             cam = self.free_cams[self.current_cam_index]
-            # print('freen', cam.R, cam.T)
-
-            # cam.time = self.time
+            cam.time = self.time
+            
+            
             if self.trainable_abc is None:
-                abc = self.scene.ibl.abc
-                texture = self.scene.ibl[cam.uid]
+                abc = self.scene.ibl.abc.cuda()
+                
+                id1 = int(self.time*100)
+                texture = self.scene.ibl[id1].cuda()
+
             else:
                 abc = self.trainable_abc()
                 texture = self.trainable_abc.background_texture
-            
-            buffer_image = render(
-                    cam,
-                    self.gaussians,
-                    abc,
-                    texture,
-                    view_args={
-                        "vis_mode":self.vis_mode,
-                        "stage":self.stage
-                    },
-            )
-
-            try:
-                buffer_image = buffer_image["render"]
-            except:
-                print(f'Mode "{self.vis_mode}" does not work')
-                buffer_image = buffer_image['render']
                 
-            # if buffer_image.shape[0] == 1:
-            #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
-            #     buffer_image = buffer_image.repeat(3,1,1)
-            buffer_image = torch.nn.functional.interpolate(
-                buffer_image.unsqueeze(0),
-                size=(self.H,self.W),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            
-            try:
-                if self.show_mask == 'occ':
-                    mask = cam.sceneoccluded_mask.squeeze(0).cuda()
-                elif self.show_mask == 'scene':
-                    mask = cam.scene_mask.squeeze(0).cuda()
-                else:
-                    mask = 0.
-                buffer_image[0] += mask*0.5
-            except:
-                pass
-            
-            self.buffer_image = (
-                buffer_image.permute(1, 2, 0)
-                .contiguous()
-                .clamp(0, 1)
-                .contiguous()
-                .detach()
-                .cpu()
-                .numpy()
-            )
+            if self.vis_mode != "triangles":
+                
+                buffer_image = render(
+                        cam,
+                        self.gaussians,
+                        abc,
+                        texture,
+                        view_args={
+                            "vis_mode":self.vis_mode,
+                            "stage":self.stage
+                        },
+                )
 
+                try:
+                    buffer_image = buffer_image["render"]
+                except:
+                    print(f'Mode "{self.vis_mode}" does not work')
+                    buffer_image = buffer_image['render']
+                    
+                # if buffer_image.shape[0] == 1:
+                #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
+                #     buffer_image = buffer_image.repeat(3,1,1)
+                if self.vis_mode == 'invariance':
+                    buffer_image = buffer_image.squeeze(-1).repeat(3,1,1)
+                buffer_image = torch.nn.functional.interpolate(
+                    buffer_image.unsqueeze(0),
+                    size=(self.H,self.W),
+                    mode="bilinear",
+                    align_corners=False,
+                ).squeeze(0)
+                
+                try:
+                    if self.show_mask == 'occ':
+                        mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+                    elif self.show_mask == 'scene':
+                        mask = cam.scene_mask.squeeze(0).cuda()
+                    else:
+                        mask = 0.
+                    buffer_image[0] += mask*0.5
+                except:
+                    pass
+                
+                self.buffer_image = (
+                    buffer_image.permute(1, 2, 0)
+                    .contiguous()
+                    .clamp(0, 1)
+                    .contiguous()
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+            else:
+                buffer_image = render_triangles(
+                        cam,
+                        self.gaussians,
+                        abc,
+                        texture,
+                )
+                
         buffer_image = self.buffer_image
 
         dpg.set_value(
@@ -416,6 +453,8 @@ class GUIBase:
         ):
             # add the texture
             dpg.add_image("_texture")
+            
+        
 
         # dpg.set_primary_window("_primary_window", True)
 
@@ -535,18 +574,24 @@ class GUIBase:
                     self.vis_mode = 'normals'
                 def callback_toggle_show_alpha(sender):
                     self.vis_mode = 'alpha'
+                def callback_toggle_show_invariance(sender):
+                    self.vis_mode = 'invariance'
                     
+                def callback_toggle_show_invariance(sender):
+                    self.vis_mode = 'triangles'
+                    
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_invariance)  
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
                     dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
                     dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
+                    dpg.add_button(label="Invar", callback=callback_toggle_show_invariance)
                 
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="D", callback=callback_toggle_show_depth)
                     dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="2D", callback=callback_toggle_show_2dgsdepth)
-
-            
                 
                 def callback_speed_control(sender):
                     self.time = dpg.get_value(sender)
@@ -559,64 +604,70 @@ class GUIBase:
                     callback=callback_speed_control,
                 )
                 
-            def zoom_callback_fov(sender, app_data):
-                delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
-                cam = self.free_cams[self.current_cam_index]
+        
+        def zoom_callback_fov(sender, app_data):
+            delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
+            cam = self.free_cams[self.current_cam_index]
 
-                zoom_scale = 0.01  # Smaller = faster zoom
+            zoom_scale = 0.01  # Smaller = faster zoom
 
-                # Scale FoV within limits
-                cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
-                cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
+            # Scale FoV within limits
+            cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
+            cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
 
-                cam.update_projections()
+            cam.update_projections()
+        
+
+        def drag_callback(sender, app_data):
+            # app_data = (button, rel_x, rel_y)
+            # button: 0=left, 1=right, 2=middle
+            button, rel_x, rel_y = app_data
             
+            if button != 0:  # only left drag
+                return
 
-            def drag_callback(sender, app_data):
-                # app_data = (button, rel_x, rel_y)
-                # button: 0=left, 1=right, 2=middle
-                button, rel_x, rel_y = app_data
+            # simply check inside primary window dimensions
+            if dpg.get_active_window() != dpg.get_alias_id("_primary_window"):
+                return
+            
+            cam = self.free_cams[self.current_cam_index]
+
+            # Sensitivity
+            yaw_speed = 0.0001
+            pitch_speed = 0.0001
+
+            # Convert mouse drag into yaw/pitch rotations
+            yaw = -rel_x * yaw_speed
+            pitch = rel_y * pitch_speed
+
+            # --- Rotation Matrices ---
+            Ry = np.array([
+                [np.cos(yaw), 0, np.sin(yaw)],
+                [0, 1, 0],
+                [-np.sin(yaw), 0, np.cos(yaw)]
+            ])
+
+            Rx = np.array([
+                [1, 0, 0],
+                [0, np.cos(pitch), -np.sin(pitch)],
+                [0, np.sin(pitch), np.cos(pitch)]
+            ])
+
+            R_drag = Rx @ Ry
+
+            R_c2w = cam.R
+
+            R_c2w_new = R_drag @ R_c2w
+            
+            cam.R = R_c2w_new
                 
-                if button != 0:  # only left drag
-                    return
+            cam.update_projections()
 
-                cam = self.free_cams[self.current_cam_index]
-
-                # Sensitivity
-                yaw_speed = 0.0001
-                pitch_speed = 0.0001
-
-                # Convert mouse drag into yaw/pitch rotations
-                yaw = -rel_x * yaw_speed
-                pitch = rel_y * pitch_speed
-
-                # --- Rotation Matrices ---
-                Ry = np.array([
-                    [np.cos(yaw), 0, np.sin(yaw)],
-                    [0, 1, 0],
-                    [-np.sin(yaw), 0, np.cos(yaw)]
-                ])
-
-                Rx = np.array([
-                    [1, 0, 0],
-                    [0, np.cos(pitch), -np.sin(pitch)],
-                    [0, np.sin(pitch), np.cos(pitch)]
-                ])
-
-                R_drag = Rx @ Ry
-
-                R_c2w = cam.R
-
-                R_c2w_new = R_drag @ R_c2w
-                
-                cam.R = R_c2w_new
-                    
-                cam.update_projections()
-
-            with dpg.handler_registry():
-                dpg.add_mouse_wheel_handler(callback=zoom_callback_fov)
-                dpg.add_mouse_drag_handler(callback=drag_callback)
-                
+        with dpg.handler_registry():
+            dpg.add_mouse_wheel_handler(callback=zoom_callback_fov)
+            dpg.add_mouse_drag_handler(callback=drag_callback)
+            
+            
         dpg.create_viewport(
             title=f"{self.runname}",
             width=self.W + 400,

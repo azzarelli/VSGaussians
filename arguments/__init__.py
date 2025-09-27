@@ -122,23 +122,28 @@ class OptimizationParams(ParamGroup):
         self.grid_lr_init = 0.0016
         self.grid_lr_final = 0.00016
 
+        # 3DGS/2DGS learning parameters
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
+        
+        # Relighting learning parameters
+        self.invariance_lr = 0.001
+
+        
         self.percent_dense = 0.01
-        self.lambda_dssim = 0
-        self.lambda_lpips = 0
+        
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000
+        
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
-        self.densify_from_iter = 500
-        self.densify_until_iter = 15_000
-        self.densify_grad_threshold= 0.0001
-        self.pruning_from_iter = 500
-        self.pruning_interval = 100
+        
+        self.densify_from_iter = 100
+        self.densify_until_iter = 6_000
+
         self.batch_size=1
         
         self.add_point=False

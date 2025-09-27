@@ -3,14 +3,14 @@ ModelHiddenParams = dict(
      'grid_dimensions': 2,
      'input_coordinate_dim': 4,
      'output_coordinate_dim': 16,
-     'resolution': [512, 25],
+     'resolution': [512, 100],
      'wavelevel':2
     },
     target_config = {
      'grid_dimensions': 2,
      'input_coordinate_dim': 4,
      'output_coordinate_dim': 16,
-     'resolution': [512, 50],
+     'resolution': [512, 100],
      'wavelevel':2
     },
 
@@ -24,13 +24,14 @@ ModelHiddenParams = dict(
 
 OptimizationParams = dict(
     dataloader=True,
-    iterations=8000, # 7000 salmon with 4 batch, 8000 with flame steak
-    batch_size=2, # Was 4
+    iterations=16000, # 7000 salmon with 4 batch, 8000 with flame steak
+    batch_size=1, # Was 4
     
-    opacity_reset_interval = 3000,    
-
-    pruning_interval = 100,
-    pruning_from_iter=3000,
-    lambda_dssim = 0., #0.1,
+    opacity_reset_interval = 120000,    
+    densification_interval = 500,
+    
+    densify_from_iter = 3000,
+    densify_until_iter = 12000,
+    
     
 )

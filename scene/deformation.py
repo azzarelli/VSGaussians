@@ -3,11 +3,6 @@ import torch.nn as nn
 import torch.nn.init as init
 from scene.waveplanes import WavePlaneField
 
-from scene.triplanes import TriPlaneField
-
-import time
-
-from torch_cluster import knn_graph
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
 # Source: https://www.image-engineering.de/library/technotes/958-how-to-convert-between-srgb-and-ciexyz
@@ -80,33 +75,27 @@ class Deformation(nn.Module):
         self.spacetime_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
 
         self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1), nn.Sigmoid())
-
-        
         self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*3))
     
     def query_spacetime(self, rays_pts_emb, time):
         # L2 Norm of CLIP feature
         # time = time / time.norm(dim=-1, keepdim=True)
 
-        feature = self.clip_decode(time.cuda())
+        # feature = self.clip_decode(time.cuda())
 
-        space, spacetime = self.grid(rays_pts_emb[:,:3], feature)
-
+        space, spacetime = self.grid(rays_pts_emb[:,:3], time.cuda())
         st = self.spacetime_enc(space * spacetime)
         return st
     
     
-    def forward(self,rays_pts_emb, rotations_emb, scale_emb, shs_emb, view_dir, time_emb, h_emb):
+    def forward(self,rays_pts_emb, rotations_emb, scale_emb, shs_emb, inv_emb, view_dir, time_emb, h_emb):
 
-        # covariances = self.covariance_activation(scale_emb, 1., rotations_emb)
-        # dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
+        dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
         
-        # shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
+        inv_emb = inv_emb.unsqueeze(-1)
+        shs = shs_emb*inv_emb + (1.-inv_emb)*self.shs_deform(dyn_feature).view(-1, 16, 3)
         
-        # Essentially no view-dependancy
-        # shs[1:] *= 0.
-        
-        return rays_pts_emb, rotations_emb, h_emb[:,0].unsqueeze(-1), shs_emb, None
+        return rays_pts_emb, rotations_emb, h_emb, shs, None
     
     def get_mlp_parameters(self):
         parameter_list = []
@@ -128,17 +117,18 @@ class deform_network(nn.Module):
         super(deform_network, self).__init__()
         net_width = args.net_width
 
-        self.deformation_net = Deformation(W=net_width,  args=args)
+        self.deformation_net = Deformation(W=net_width,  args=args).cuda()
 
         self.apply(initialize_weights)
 
-    def forward(self, point, rotations=None, scales=None, shs=None,view_dir=None, times_sel=None, h_emb=None, iteration=None):
+    def forward(self, point, rotations=None, scales=None,invariance=None, shs=None,view_dir=None, times_sel=None, h_emb=None, iteration=None):
 
         return  self.deformation_net(
             point,
             rotations,
             scales,
             shs,
+            invariance,
             view_dir,
             times_sel, 
             h_emb=h_emb, 

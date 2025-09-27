@@ -14,11 +14,13 @@ from arguments import ModelParams, PipelineParams, OptimizationParams, ModelHidd
 from torch.utils.data import DataLoader
 from utils.timer import Timer
 
+from utils.loss_utils import l1_loss
 
 from gaussian_renderer import render_batch, render
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
+import matplotlib.pyplot as plt
 
 from gui_utils.base import GUIBase
 class GUI(GUIBase):
@@ -73,11 +75,11 @@ class GUI(GUIBase):
         # Set the gaussian mdel and scene
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None:
-            scene = Scene(dataset, gaussians, args.cam_config, load_iteration=ckpt_start)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start)
         else:
             if skip_coarse:
                 gaussians.active_sh_degree = dataset.sh_degree
-            scene = Scene(dataset, gaussians, args.cam_config, skip_coarse=self.skip_coarse)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, skip_coarse=self.skip_coarse)
         
         self.total_frames = scene.maxframes
         # Initialize DPG      
@@ -91,8 +93,7 @@ class GUI(GUIBase):
         if skip_coarse:
             self.iteration = 1
         if ckpt_start: self.iteration = int(self.scene.loaded_iter) + 1
-        
-    
+         
     def init_taining(self):
         self.final_iter = self.opt.iterations
         first_iter = 1
@@ -122,23 +123,22 @@ class GUI(GUIBase):
             self.scene.train_camera.loading_flags["scene_occluded"] = True
             self.scene.train_camera.loading_flags["scene"] = False
             
-            self.viewpoint_stack = [cam for cam in self.scene.train_camera]*1000
+            self.viewpoint_stack = self.scene.train_camera
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                 num_workers=16, collate_fn=list))
-        
-        self.scene.train_camera.loading_flags["image"] = False
-        self.scene.train_camera.loading_flags["glass"] = False
-        self.scene.train_camera.loading_flags["scene_occluded"] = False
-        self.scene.train_camera.loading_flags["scene"] = False
-        self.filter_3D_stack = [cam for idx, cam in enumerate(self.scene.train_camera) if idx < self.scene.num_cams]
     
     @property
     def get_batch_views(self, stack=None):
+        self.scene.train_camera.loading_flags["image"] = True
+        self.scene.train_camera.loading_flags["glass"] = False
+        self.scene.train_camera.loading_flags["scene_occluded"] = True
+        self.scene.train_camera.loading_flags["scene"] = False
+            
         try:
             viewpoint_cams = next(self.loader)
         except StopIteration:
             viewpoint_stack_loader = DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list)
+                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
             self.loader = iter(viewpoint_stack_loader)
             viewpoint_cams = next(self.loader)
         
@@ -146,44 +146,43 @@ class GUI(GUIBase):
 
     def train_step(self):
 
-        # Start recording step duration
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        self.iter_start.record()
         
-        if self.iteration < self.opt.iterations:
-            self.gaussians.optimizer.zero_grad(set_to_none=True)
-        # Update Gaussian lr for current iteration
-        self.gaussians.update_learning_rate(self.iteration)
+        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
+        
            
-        viewpoint_cams = self.get_batch_views
+        viewpoint_cams = self.get_batch_views[0]
 
-        # print("Dupelicating Dynamics")
-        # self.gaussians.oneupSHdegree() #dynamic_dupelication()
-        # self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
-                
-        L1, dL1 = render_batch(
+        rgb, info = render_batch(
             viewpoint_cams, 
             self.gaussians,
         )
+        
+        self.gaussians.pre_backward(self.iteration, info)
+        
+        gt_img = viewpoint_cams.image.cuda() * (viewpoint_cams.sceneoccluded_mask.cuda())
+        
+        # with torch.no_grad():
+        #     img = viewpoint_cams.image.permute(1, 2, 0).detach().cpu().numpy()
+        #     img = img.clip(0, 1)
+        #     plt.imshow(img)
+        #     plt.axis("off")
+        #     plt.show()
+        loss = l1_loss(rgb, gt_img)
 
         # planeloss = self.gaussians.compute_regulation(
         #     self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
         #     self.hyperparams.minview_weight
         # )
-
-        loss = L1 + dL1 # +  planeloss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    dpg.set_value("_log_loss", f"Loss: {L1.item()}")
+                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
                     # dpg.set_value("_log_depth", f"Depth Loss: {dL1.item()}")
-                    dpg.set_value("_log_points", f"Number points: {self.gaussians._xyz.shape[0]} ")
+                    dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
 
-            if self.iteration % 2000 == 0:
-                self.track_cpu_gpu_usage(0.1)
+            
             # Error if loss becomes nan
             if torch.isnan(loss).any():
                     
@@ -192,26 +191,10 @@ class GUI(GUIBase):
                 
         # Backpass
         loss.backward()
-        self.gaussians.optimizer.step()
-        self.gaussians.optimizer.zero_grad(set_to_none = True)
-        self.iter_end.record()
+
+        self.gaussians.post_backward(self.iteration, info)
+
         
-        with torch.no_grad():
-            self.timer.pause() # log and save
-           
-            torch.cuda.synchronize()
-            # Save scene when at the saving iteration
-            if (self.iteration in self.saving_iterations) or (self.iteration == self.final_iter-1):
-                self.save_scene()
-
-            self.timer.start()
-
-            if self.iteration % 100 == 0 and self.iteration < self.final_iter - 200:
-                self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
-            
-            # if self.iteration % self.opt.opacity_reset_interval == 0 and self.iteration < (self.final_iter - 100):
-            #     self.gaussians.reset_opacity()
-
 
     def nvs(self):
 

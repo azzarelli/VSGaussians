@@ -171,6 +171,11 @@ class Camera(nn.Module):
         if c2w is None:
             c2w = self.world_view_transform.transpose(0, 1).inverse().to(device)
 
+        if fx is None:
+            fx = self.fx
+            fy = self.fy
+            cx = self.cx
+            cy = self.cy
         # Pixel grid
         i = torch.arange(W, device=device, dtype=torch.float32)
         j = torch.arange(H, device=device, dtype=torch.float32)

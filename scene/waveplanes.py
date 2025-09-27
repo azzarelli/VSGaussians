@@ -70,6 +70,7 @@ def interpolate_features_MUL(data, kplanes):
 
         elif i in [2, 4, 5]:
             spacetime = spacetime * feature
+
     return space, spacetime
    
 
@@ -243,13 +244,11 @@ class WavePlaneField(nn.Module):
         return ms_planes
 
     def forward(self, pts, feature):
-        feature = feature.repeat(pts.shape[0], 1)
                 
         pts = normalize_aabb(pts, self.aabb)
         pts = pts.reshape(-1, 3)
 
         pts = torch.cat([pts, feature], dim=-1)
-        
         return interpolate_features_MUL(
             pts, self.grids)
 
