@@ -21,54 +21,6 @@ from torchvision import transforms as T
 TRANSFORM = T.ToTensor()
 
 
-# def getProjectionMatrix_(znear, zfar, fovX, fovY, ppx, ppy, image_width, image_height):
-#     """
-#     Generate a perspective projection matrix incorporating the principal point (ppx, ppy).
-
-#     Parameters:
-#         znear (float): Distance to the near clipping plane.
-#         zfar (float): Distance to the far clipping plane.
-#         fovX (float): Horizontal field of view in radians.
-#         fovY (float): Vertical field of view in radians.
-#         ppx (float): Principal point x-coordinate (image center x).
-#         ppy (float): Principal point y-coordinate (image center y).
-#         image_width (float): Width of the image.
-#         image_height (float): Height of the image.
-
-#     Returns:
-#         torch.Tensor: A 4x4 perspective projection matrix.
-#     """
-#     tanHalfFovY = math.tan(fovY / 2)
-#     tanHalfFovX = math.tan(fovX / 2)
-
-#     top = tanHalfFovY * znear
-#     bottom = -top
-#     right = tanHalfFovX * znear
-#     left = -right
-
-#     # Adjust the projection based on the principal point
-#     offset_x = 2 * (ppx / image_width) - 1  # Normalized offset in [-1, 1]
-#     offset_y = 2 * (ppy / image_height) - 1  # Normalized offset in [-1, 1]
-
-#     # Initialize the projection matrix
-#     P = torch.zeros(4, 4)
-
-#     z_sign = 1.0  # Use 1.0 for a right-handed coordinate system
-
-#     # Scale factors for x and y
-#     P[0, 0] = 2.0 * znear / (right - left)
-#     P[1, 1] = 2.0 * znear / (top - bottom)
-
-#     # Translation offsets
-#     P[0, 2] = (right + left) / (right - left) - offset_x
-#     P[1, 2] = (top + bottom) / (top - bottom) - offset_y
-
-#     # Depth scaling and perspective division
-#     P[3, 2] = z_sign
-#     P[2, 2] = z_sign * zfar / (zfar - znear)
-#     P[2, 3] = -(zfar * znear) / (zfar - znear)
-
-#     return P
 
 def getProjectionMatrixFromIntrinsics(fx, fy, cx, cy, width, height, znear, zfar):
     P = torch.zeros(4, 4)
@@ -176,7 +128,7 @@ class Camera(nn.Module):
             fy = self.fy
             cx = self.cx
             cy = self.cy
-        # Pixel grid
+        # Pixel grid 
         i = torch.arange(W, device=device, dtype=torch.float32)
         j = torch.arange(H, device=device, dtype=torch.float32)
         jj, ii = torch.meshgrid(j, i, indexing="ij")  # [H,W]
@@ -190,7 +142,7 @@ class Camera(nn.Module):
 
         # Transform to world space
         dirs_world = dirs_cam @ c2w[:3, :3].T
-        dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+        dirs_world = dirs_world  / torch.norm(dirs_world, dim=-1, keepdim=True)
         origins_world = c2w[:3, 3].expand_as(dirs_world)
 
         return origins_world, dirs_world
@@ -262,18 +214,3 @@ class Camera(nn.Module):
             self.glass_mask = TRANSFORM(
                 Image.open(self.glass_path).split()[-1]
             )
-    
-class MiniCam:
-    def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform, time):
-        self.image_width = width
-        self.image_height = height    
-        self.FoVy = fovy
-        self.FoVx = fovx
-        self.znear = znear
-        self.zfar = zfar
-        self.world_view_transform = world_view_transform
-        self.full_proj_transform = full_proj_transform
-        view_inv = torch.inverse(self.world_view_transform)
-        self.camera_center = view_inv[3][:3]
-        self.time = time
-

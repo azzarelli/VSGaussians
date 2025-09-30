@@ -60,11 +60,80 @@ class GUIBase:
         
         if bundle_adjust and view_test == False :
             self.run_bundle_adjustment()
+            self.test_optix()
         elif self.gui:
             print('DPG loading ...')
             dpg.create_context()
             self.register_dpg()
 
+    def test_optix(self):
+        # Load DPG
+        print('Running Optix Viewer Test...')
+        # dpg.create_context()
+        # self.register_dpg()
+
+        from gaussian_renderer.ray_tracer import OptixTriangles
+        import cupy as cp
+        from PIL import Image, ImageOps
+
+        optix_runner = OptixTriangles()
+        
+        def gen_tris_from_pcd(optix_runner):
+            
+            p0 = self.gaussians.get_xyz
+            # print(p0.shape)
+            # exit()
+            # p0 = p0.mean(0).unsqueeze(0) + p0
+            p1 = p0.clone()
+            # p1[:, 0] += 0.0001
+            # p1[:, 1] += 0.0001 
+            p1[:, 2] += 0.01
+            p2 = p0.clone()
+            p2[:, 1] += 0.01
+            # p2[:, 1] += 0.0001
+            
+            # colors = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
+            
+            tris0 = torch.cat([
+                p0.unsqueeze(1),p1.unsqueeze(1), p2.unsqueeze(1),
+                ], dim=1).view(-1, 3)
+
+            # colors = torch.rand(tris0.shape[0], 3, device="cuda")
+            # tris0 = self.scene.ibl.abc.clone().unsqueeze(0).repeat(2,1,1).view(-1, 3)
+
+            tris0 = cp.from_dlpack(torch.utils.dlpack.to_dlpack(tris0))
+            # tris0 = cp.array([[-0.5, -0.5, 0.0],
+            #                  [ 0.5, -0.5, 0.0],
+            #                  [ 0.0,  0.5, 0.0]], dtype=np.float32)
+            optix_runner.update_gas(tris0)
+
+
+        while dpg.is_dearpygui_running():
+            with torch.no_grad():
+                cam = self.free_cams[self.current_cam_index]
+                gen_tris_from_pcd(optix_runner=optix_runner)
+                img = optix_runner.trace(cam)
+                buffer_image = torch.utils.dlpack.from_dlpack(img).float()[:, :, :3] /255.
+                
+                self.buffer_image = (
+                    buffer_image
+                    .contiguous()
+                    .clamp(0, 1)
+                    .contiguous()
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+                dpg.set_value(
+                    "_texture", self.buffer_image
+                )
+                dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")                  
+                dpg.render_dearpygui_frame()
+                cp.cuda.Stream.null.synchronize()
+
+        exit()
+            
     def run_bundle_adjustment(self):
         # Load DPG
         print('Running Bundle Adjustment...')
@@ -633,11 +702,11 @@ class GUIBase:
             cam = self.free_cams[self.current_cam_index]
 
             # Sensitivity
-            yaw_speed = 0.0001
+            yaw_speed = -0.0001
             pitch_speed = 0.0001
 
             # Convert mouse drag into yaw/pitch rotations
-            yaw = -rel_x * yaw_speed
+            yaw = rel_x * yaw_speed
             pitch = rel_y * pitch_speed
 
             # --- Rotation Matrices ---
