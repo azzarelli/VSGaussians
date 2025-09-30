@@ -112,6 +112,7 @@ class GUIBase:
             with torch.no_grad():
                 cam = self.free_cams[self.current_cam_index]
                 gen_tris_from_pcd(optix_runner=optix_runner)
+                
                 img = optix_runner.trace(cam)
                 buffer_image = torch.utils.dlpack.from_dlpack(img).float()[:, :, :3] /255.
                 
@@ -678,7 +679,7 @@ class GUIBase:
             delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
             cam = self.free_cams[self.current_cam_index]
 
-            zoom_scale = 0.01  # Smaller = faster zoom
+            zoom_scale = 0.1  # Smaller = faster zoom
 
             # Scale FoV within limits
             cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale

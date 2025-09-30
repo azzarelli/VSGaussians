@@ -134,11 +134,11 @@ class Camera(nn.Module):
         jj, ii = torch.meshgrid(j, i, indexing="ij")  # [H,W]
 
         # Camera-space ray directions (OpenGL convention: +y up, -z forward)
-        x = -(ii - cx) / fx
-        y = -(jj - cy) / fy
-        z = -torch.ones_like(x)
+        x = (ii - cx) / fx
+        y = (jj - cy) / fy
+        z = torch.ones_like(x)
         dirs_cam = torch.stack([x, y, z], dim=-1)  # [H,W,3]
-        dirs_cam = dirs_cam / torch.norm(dirs_cam, dim=-1, keepdim=True)
+        dirs_cam = dirs_cam #/ torch.norm(dirs_cam, dim=-1, keepdim=True)
 
         # Transform to world space
         dirs_world = dirs_cam @ c2w[:3, :3].T

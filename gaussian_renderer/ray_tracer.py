@@ -2,6 +2,7 @@ import os
 import optix as ox
 import cupy as cp
 import numpy as np
+import torch
 
 DEBUG = True
 
@@ -57,9 +58,6 @@ def create_sbt(program_grps):
 def log_callback(level, tag, msg):
     print("[{:>2}][{:>12}]: {}".format(level, tag, msg))
     
-
-
-    
 class OptixTriangles:
     
     def __init__(self):
@@ -96,7 +94,7 @@ class OptixTriangles:
         """
         self.vertices = vertices
 
-        build_input = ox.BuildInputTriangleArray(vertices, flags=[ox.GeometryFlags.NONE])
+        build_input = ox.BuildInputTriangleArray(vertices, flags=[ox.GeometryFlags.DISABLE_ANYHIT])
         self.gas = ox.AccelerationStructure(
             self.ctx, 
             build_input,
@@ -110,28 +108,16 @@ class OptixTriangles:
 
         # Build launch params
         params_tmp = [
-            ('u8',  'image'),
-            ('u4',  'image_width'),
-            ('u4',  'image_height'),
-            ('3f4', 'cam_eye'),
-            ('3f4', 'cam_u'),
-            ('3f4', 'cam_v'),
-            ('3f4', 'cam_w'),
-            ('u8',  'trav_handle')
+            ('u8', 'image'),
+            ('u4', 'image_width'),
+            ('u4', 'image_height'),
+            ('u8', 'ray_origin'),
+            ('u8', 'ray_direction'),
+            ('u8', 'handle')
         ]
 
         params = ox.LaunchParamsRecord(names=[p[1] for p in params_tmp],
                                     formats=[p[0] for p in params_tmp])
-        c2w = cam.pose.cpu().numpy()
-        R = c2w[:3,:3]
-        t = c2w[:3,3]
-
-
-        # params['cam_eye'] = t
-        # params['cam_U']   = R[:,0]   # right
-        # params['cam_V']   = R[:,1]   # up
-        # params['cam_W']   = R[:,2]   # forward
-
 
         output_image = np.zeros((H,W, 4), 'B')
         output_image[:, :, :] = [255, 128, 0, 255]
@@ -140,29 +126,19 @@ class OptixTriangles:
         params['image'] = output_image.data.ptr
         params['image_width'] = W
         params['image_height'] =  H
-        c2w = cam.pose.cpu().numpy()
-        R = c2w[:3,:3]
-        t = c2w[:3,3]
+        
+        o, d = cam.generate_rays()  # (H, W, 3) torch tensors
+        
+        # Pad to float4
+        o4 = cp.zeros((o.shape[0]*o.shape[1], 4), dtype=cp.float32)
+        d4 = cp.zeros_like(o4)
+        o4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(o.view(-1, 3)))
+        d4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(d.view(-1, 3)))
 
-        W = cam.image_width
-        H = cam.image_height
-        fx, fy = cam.fx, cam.fy
-
-        # Scale factors from NDC [-1,1] to pixels
-        scale_u = W / (2.0 * fx)
-        scale_v = H / (2.0 * fy)
-
-        # Right, Up, Forward vectors from pose
-        right   = R[:,0]
-        up      = R[:,1]
-        forward = -R[:,2]   # because your raygen assumes looking down -Z
-
-        params['cam_eye'] = t
-        params['cam_u']   = right   * scale_u
-        params['cam_v']   = up      * scale_v
-        params['cam_w']   = -forward
-
-        params['trav_handle'] = self.gas.handle
+        params['ray_origin']    = o4.data.ptr
+        params['ray_direction'] = d4.data.ptr
+        
+        params['handle'] = self.gas.handle
 
         stream = cp.cuda.Stream()
 
