@@ -42,6 +42,8 @@ class GaussianModel:
 
         self.opacity_activation = torch.sigmoid
 
+        self.sigmoid_activation = torch.sigmoid
+        
         self.rotation_activation = torch.nn.functional.normalize
 
 
@@ -108,8 +110,12 @@ class GaussianModel:
         return torch.sigmoid(self.splats["opacities"])
     
     @property
-    def get_invariance(self):
+    def get_invariance_coefficient(self):
         return torch.sigmoid(self.splats["invariants"])
+    
+    @property
+    def get_reflection_coefficient(self):
+        return torch.sigmoid(self.splats["reflection"])
     
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self.get_rotation)
@@ -268,6 +274,10 @@ class GaussianModel:
         for i in range(self.splats["quats"].shape[1]):
             l.append('rot_{}'.format(i))
 
+        for i in range(self.splats["invariants"].shape[1]):
+            l.append('inv_{}'.format(i))
+        for i in range(self.splats["reflection"].shape[1]):
+            l.append('ref_{}'.format(i))
         return l
     
     def load_model(self, path):
@@ -291,11 +301,14 @@ class GaussianModel:
         f_dc = self.splats["sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         f_rest = self.splats["shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         
+        invariants = self.splats["invariants"].detach().cpu().numpy()
+        reflection = self.splats["reflection"].detach().cpu().numpy()
 
+        
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
+        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, invariants, reflection), axis=1)
         # attributes = np.concatenate((xyz, normals, colors, opacities, scale, rotation), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
@@ -345,6 +358,18 @@ class GaussianModel:
         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
 
+        inv_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("inv")]
+        inv_names = sorted(inv_names, key = lambda x: int(x.split('_')[-1]))
+        invs = np.zeros((xyz.shape[0], len(inv_names)))
+        for idx, attr_name in enumerate(inv_names):
+            invs[:, idx] = np.asarray(plydata.elements[0][attr_name])
+            
+        ref_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("ref")]
+        ref_names = sorted(ref_names, key = lambda x: int(x.split('_')[-1]))
+        ref = np.zeros((xyz.shape[0], len(ref_names)))
+        for idx, attr_name in enumerate(ref_names):
+            ref[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        
         self.active_sh_degree = self.max_sh_degree
         
         self.params = {
@@ -354,6 +379,9 @@ class GaussianModel:
             ("opacities",nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.opacity_lr),
             ("sh0", nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
             ("shN", nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
+            
+            ("invariants", nn.Parameter(torch.tensor(invs, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.invariance_lr),
+            ("reflection", nn.Parameter(torch.tensor(ref, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.invariance_lr),
         }
         self.splats = torch.nn.ParameterDict({n: v for n, v, _ in self.params}).cuda()
         
@@ -393,7 +421,8 @@ class GaussianModel:
         opacities = 0.95 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
         
         # Initialize point-relighting invariance
-        invariance = 0.05 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
+        invariance = 0.95 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
+        reflection_coef = 0.5 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
 
         
         mean_foreground = fused_point_cloud.mean(dim=0).unsqueeze(0)
@@ -415,6 +444,7 @@ class GaussianModel:
             
             # Relighting Parameters
             ("invariants", nn.Parameter(invariance.requires_grad_(True)), training_args.invariance_lr),
+            ("reflection", nn.Parameter(reflection_coef.requires_grad_(True)), training_args.invariance_lr), # TODO introduce reflection loss
         }
         self.splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to("cuda")
 

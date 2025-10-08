@@ -3,6 +3,7 @@ import optix as ox
 import cupy as cp
 import numpy as np
 import torch
+import torch.nn as nn
 
 DEBUG = True
 
@@ -57,10 +58,11 @@ def create_sbt(program_grps):
 
 def log_callback(level, tag, msg):
     print("[{:>2}][{:>12}]: {}".format(level, tag, msg))
-    
-class OptixTriangles:
-    
+
+class OptixTriangles(nn.Module):
     def __init__(self):
+        super().__init__()
+
         ctx = ox.DeviceContext(
             validation_mode=False,
             log_callback_function=log_callback,
@@ -71,8 +73,8 @@ class OptixTriangles:
         cuda_src = os.path.join(script_dir, "cuda", "triangle_ray.cu")
         pipeline_options = ox.PipelineCompileOptions(
         traversable_graph_flags=ox.TraversableGraphFlags.ALLOW_SINGLE_GAS,
-        num_payload_values=3,
-        num_attribute_values=3,
+        num_payload_values=1,
+        num_attribute_values=2,
         exception_flags=ox.ExceptionFlags.NONE,
         pipeline_launch_params_variable_name="params"
         )
@@ -119,8 +121,9 @@ class OptixTriangles:
         params = ox.LaunchParamsRecord(names=[p[1] for p in params_tmp],
                                     formats=[p[0] for p in params_tmp])
 
-        output_image = np.zeros((H,W, 4), 'B')
-        output_image[:, :, :] = [255, 128, 0, 255]
+        # output_image = np.zeros((H,W, 4), 'B')
+        output_image = cp.zeros((H, W), dtype=cp.uint32)
+        # output_image[:, :, :] = [255, 128, 0, 255]
         output_image = cp.asarray(output_image)
 
         params['image'] = output_image.data.ptr
@@ -148,4 +151,47 @@ class OptixTriangles:
 
         return output_image #cp.asnumpy(output_image)
        
-    
+    def forward(self, o, d):
+        """Intersect ray with screen or scene
+        """
+        H,W = o.shape[0], o.shape[1]
+        print("Vertices:", self.vertices.shape, self.vertices.dtype)
+        # Build launch params
+        params_tmp = [
+            ('u8', 'image'),
+            ('u4', 'image_width'),
+            ('u4', 'image_height'),
+            ('u8', 'ray_origin'),
+            ('u8', 'ray_direction'),
+            ('u8', 'handle')
+        ]
+
+        params = ox.LaunchParamsRecord(names=[p[1] for p in params_tmp],
+                                    formats=[p[0] for p in params_tmp])
+
+        output_image = cp.zeros((H, W), dtype=cp.uint32)
+        # output_image[:, :, :] = [255, 128, 0, 255]
+        output_image = cp.asarray(output_image)
+
+        params['image'] = output_image.data.ptr
+        params['image_width'] = W
+        params['image_height'] =  H
+                
+        # Pad to float4
+        o4 = cp.zeros((o.shape[0]*o.shape[1], 4), dtype=cp.float32)
+        d4 = cp.zeros_like(o4)
+        o4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(o.view(-1, 3)))
+        d4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(d.view(-1, 3)))
+
+        params['ray_origin']    = o4.data.ptr
+        params['ray_direction'] = d4.data.ptr
+        
+        params['handle'] = self.gas.handle
+
+        stream = cp.cuda.Stream()
+
+        self.pipeline.launch(self.sbt, dimensions=(W,H), params=params, stream=stream)
+
+        stream.synchronize()
+
+        return output_image

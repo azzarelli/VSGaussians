@@ -6,7 +6,7 @@ import psutil
 import torch
 from gaussian_renderer import render, render_triangles
 from tqdm import tqdm
-
+import time
 class GUIBase:
     """This method servers to intialize the DPG visualization (keeping my code cleeeean!)
     
@@ -60,12 +60,20 @@ class GUIBase:
         
         if bundle_adjust and view_test == False :
             self.run_bundle_adjustment()
-            self.test_optix()
+            self.init_optix()        
+            # self.test_optix()
         elif self.gui:
             print('DPG loading ...')
             dpg.create_context()
             self.register_dpg()
 
+    def init_optix(self):
+        print('Running Optix Viewer Test...')
+        from gaussian_renderer.ray_tracer import OptixTriangles
+
+        self.optix_runner = OptixTriangles()
+        
+        
     def test_optix(self):
         # Load DPG
         print('Running Optix Viewer Test...')
@@ -110,6 +118,7 @@ class GUIBase:
 
         while dpg.is_dearpygui_running():
             with torch.no_grad():
+                
                 cam = self.free_cams[self.current_cam_index]
                 gen_tris_from_pcd(optix_runner=optix_runner)
                 
@@ -401,7 +410,7 @@ class GUIBase:
  
     @torch.no_grad()
     def viewer_step(self):
-        
+        t0 = time.time()
         if self.switch_off_viewer == False:
             self.scene.ba_camera.loading_flags["image"] = True
             self.scene.ba_camera.loading_flags["glass"] = False
@@ -478,10 +487,21 @@ class GUIBase:
                 buffer_image = render_triangles(
                         cam,
                         self.gaussians,
-                        abc,
-                        texture,
+                        self.optix_runner
                 )
                 
+                self.buffer_image = (
+                    buffer_image
+                    .contiguous()
+                    .clamp(0, 1)
+                    .contiguous()
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+        t1 = time.time()
+        
         buffer_image = self.buffer_image
 
         dpg.set_value(
@@ -490,6 +510,7 @@ class GUIBase:
         
         # Add _log_view_camera
         dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")
+        dpg.set_value("_log_infer_time", f"{1./(t1-t0)} ")
 
     def save_scene(self):
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))
@@ -647,11 +668,11 @@ class GUIBase:
                 def callback_toggle_show_invariance(sender):
                     self.vis_mode = 'invariance'
                     
-                def callback_toggle_show_invariance(sender):
+                def callback_toggle_show_triangles(sender):
                     self.vis_mode = 'triangles'
                     
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_invariance)  
+                    dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_triangles)  
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
                     dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
