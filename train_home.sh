@@ -31,6 +31,5 @@ elif [ "$3" == "nvs" ]; then
 else
   echo "Training starting..."
 
-  TORCH_USE_CUDA_DSA=1 CUDA_LAUNCH_BLOCKING=1 python gui.py -s /media/barry/56EA40DEEA40BBCD/DATA/$SAVEDIR/ --expname "home/$SAVEDIR/$EXP_NAME" --configs arguments/dynerf/steak.py --test_iterations 1000 --bundle-adjust
-
+  CUDA_LAUNCH_BLOCKING=1 python gui.py -s /media/barry/56EA40DEEA40BBCD/DATA/$SAVEDIR/ --expname "home/$SAVEDIR/$EXP_NAME" --configs arguments/dynerf/steak.py --test_iterations 1000 --bundle-adjust
 fi

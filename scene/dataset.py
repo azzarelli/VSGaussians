@@ -14,13 +14,12 @@ class FourDGSdataset(Dataset):
         
         self.loading_flags = {
             "image":True,
-            "glass":False,
-            "scene":False,
             "scene_occluded":False,
             
         }
         
     def __getitem__(self, index):
+        
         cam = Camera(
             R=self.dataset[index].R, T=self.dataset[index].T,
             fx=self.dataset[index].fx, fy=self.dataset[index].fy,
@@ -32,21 +31,12 @@ class FourDGSdataset(Dataset):
 
             image_path=self.dataset[index].image_path,
             sceneoccluded_path=self.dataset[index].so_path,
-            scene_path=self.dataset[index].s_path,
-            glass_path=self.dataset[index].g_path,
-            
             uid=self.dataset[index].uid,
             data_device=torch.device("cuda"), 
         )
         
         if self.loading_flags["image"]:
             cam.load_image_from_flags("image")
-            
-        if self.loading_flags["scene"]:
-            cam.load_image_from_flags("scene")
-            
-        if self.loading_flags["glass"]:
-            cam.load_image_from_flags("glass")
             
         if self.loading_flags["scene_occluded"]:
             cam.load_image_from_flags("scene_occluded")

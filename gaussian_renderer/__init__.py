@@ -5,7 +5,7 @@ import cupy as cp
 
 from gsplat.rendering import rasterization, rasterization_2dgs
 
-
+from gaussian_renderer.ray_tracer import RaycastSTE
 
 def render_IBL_source(cam, abc, texture, device="cuda"):
     intr = cam.intrinsics
@@ -25,19 +25,33 @@ def process_Gaussians(pc, time):
     
     invariance = pc.get_invariance_coefficient    
 
-    # means3D, rotations, opacity, colors, extras = pc._deformation(
-    #     point=means3D, 
-    #     rotations=rotations,
-    #     scales=scales,
-    #     times_sel=time,
-    #     invariance=invariance,
-    #     h_emb=opacity,
-    #     shs=colors,
-    # )
-
     rotations = pc.rotation_activation(rotations)
     
         
+    return means3D, rotations, opacity, colors, scales, invariance
+
+def process_overfit_Gaussians(pc, time):
+    means3D = pc.get_xyz
+    colors = pc.get_features
+    opacity = pc.get_opacity
+
+    scales = pc.get_scaling
+    rotations = pc.splats["quats"]
+    
+    invariance = pc.get_invariance_coefficient    
+
+    means3D, rotations, opacity, colors, extras = pc._deformation(
+        point=means3D, 
+        rotations=rotations,
+        scales=scales,
+        times_sel=time,
+        invariance=invariance,
+        h_emb=opacity,
+        shs=colors,
+    )
+
+    rotations = pc.rotation_activation(rotations)
+    
     return means3D, rotations, opacity, colors, scales, invariance
  
 
@@ -51,17 +65,21 @@ def process_Gaussians_extended(pc):
     
     invariance = pc.get_invariance_coefficient    
     reflections = pc.get_reflection_coefficient    
+    refraction = pc.get_refraction_coefficient    
 
     rotations = pc.rotation_activation(rotations)
         
-    return means3D, rotations, opacity, colors, scales, invariance, reflections
+    return means3D, rotations, opacity, colors, scales, invariance, reflections, refraction
  
-def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB"):
+def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
-        gmode = 'RGB'
+        gmode = 'RGB+D'
     elif mode == "invariance":
         colors = invariance.unsqueeze(0)
-        opacity = opacity.clone().detach() * 1.0
+        opacity = opacity.detach()
+        means3D = means3D.detach()
+        rotation = rotation.detach()
+        scales = scales.detach()
         gmode = 'RGB'
         sh_deg=None
     else:
@@ -82,8 +100,10 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         sh_degree=sh_deg #pc.active_sh_degree
     )
     
+    colors = colors[..., :3]
+    
     if mode == 'normals':
-        colors = normals
+        colors = surf_normals
     elif mode == '2D':
         colors = median_depth
         
@@ -113,20 +133,20 @@ def rendering_base_intensity(means3D, rotation, scales,opacity, color, cam, sh_d
 
 def render_multi_feature(means3D, rotation, scales, opacity, cam, sh_deg=3):
     # Here we want to render the position
-    min_x = means3D[:, 0].min()
-    denom_x = means3D[:, 0].max() - min_x
-    min_y = means3D[:, 1].min()
-    denom_y = means3D[:, 1].max() - min_y
-    min_z = means3D[:, 2].min()
-    denom_z = means3D[:, 2].max() - min_z
+    # min_x = means3D[:, 0].min()
+    # denom_x = means3D[:, 0].max() - min_x
+    # min_y = means3D[:, 1].min()
+    # denom_y = means3D[:, 1].max() - min_y
+    # min_z = means3D[:, 2].min()
+    # denom_z = means3D[:, 2].max() - min_z
     
-    # Scale
-    norm_means = means3D.clone()
-    norm_means[:, 0] = (means3D[:, 0] - min_x)/denom_x
-    norm_means[:, 1] = (means3D[:, 1] - min_y)/denom_y
-    norm_means[:, 2] = (means3D[:, 2] - min_z)/denom_z
+    # # Scale
+    # norm_means = means3D.clone()
+    # norm_means[:, 0] = (means3D[:, 0] - min_x)/denom_x
+    # norm_means[:, 1] = (means3D[:, 1] - min_y)/denom_y
+    # norm_means[:, 2] = (means3D[:, 2] - min_z)/denom_z
     
-    colors = norm_means.unsqueeze(0)
+    colors = means3D.unsqueeze(0)
     opacity = opacity.clone().detach()*0. + 1.0
     gmode = 'RGB'
     sh_deg=None
@@ -144,15 +164,13 @@ def render_multi_feature(means3D, rotation, scales, opacity, cam, sh_deg=3):
         sh_degree=sh_deg
     )
     # Unscale
-    xyzs[..., 0] = (xyzs[..., 0] * denom_x) + min_x
-    xyzs[..., 1] = (xyzs[..., 1] * denom_y) + min_y
-    xyzs[..., 2] = (xyzs[..., 2] * denom_z) + min_z
+    # xyzs[..., 0] = (xyzs[..., 0] * denom_x) + min_x
+    # xyzs[..., 1] = (xyzs[..., 1] * denom_y) + min_y
+    # xyzs[..., 2] = (xyzs[..., 2] * denom_z) + min_z
+
+    _, direction = cam.generate_rays(ctype="tris")
     
-    intr = cam.intrinsics
-    fx,fy,cx,cy = intr[0,0], intr[1,1], intr[0,2], intr[1,2]
-    _, direction = cam.generate_rays(None, None, None, fx,fy,cx,cy)
-    
-    return xyzs, direction, normals
+    return xyzs, direction, normals.squeeze(0)
 
 
 def sample_IBL(origin, direction, abc, texture):
@@ -200,17 +218,70 @@ def sample_IBL(origin, direction, abc, texture):
 
     return sampled, hit_mask, hit_indices
 
-def r_render(x, d, n, abc, texture):
+SIGNS = torch.tensor([[1, 1],
+                      [-1, 1],
+                      [1, -1],
+                      [-1, -1]], dtype=torch.float).cuda()
+
+def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1):
+     # Determine the point in local Gaussian space where the curve of the 2-D Gaussian in the top-right (positive x-y) quadrant
+    #  reached y=-x
+    # c = 3.218875825 # fixed confidence at 0.8 
+    # mag_sq = mag **2
+    # a_prime = mag_sq[:, 0] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
+    # b_prime = mag_sq[:, 1] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
+    # print(a_prime.shape, mag.shape)
+    # exit()
+    
+    signs = torch.tensor([[1, 1],
+                      [-1, 1],
+                      [1, -1],
+                      [-1, -1]], device=mag.device, dtype=mag.dtype)
+    
+    mask = (opacity.squeeze(-1) > thresh)
+    colors = colors[mask]
+    means = means[mask]
+    mag = mag[mask]
+    dirs = dirs[mask]
+    
+    # Expand for broadcasting: (N, 4, 2, 3)
+    reflected = means.unsqueeze(1).unsqueeze(1) + (signs.unsqueeze(0).unsqueeze(-1) * mag.unsqueeze(1).unsqueeze(-1) * dirs.unsqueeze(1))
+
+    # reflected: (N, 4, 2, 3)
+    # Concatenate the center point to each reflected triangle
+    tris = torch.cat([means.unsqueeze(1).unsqueeze(1).expand(-1, 4, -1, -1), reflected], dim=2)  # (N, 4, 3, 3)
+
+    # Flatten all triangles
+    return tris.reshape(-1, 3), colors
+
+def r_render(x, d, n, abc, texture, optix_runner, means3D, pc, colors, opacity, N=4, update_verts=False):
+    """Ray-Screen Intersection w/ intersection mask
+        args:
+            N : int, number of triangles per gaussian
+            update_verts : bool, one needs to be here once
+    """
+    x,d = x.squeeze(0), d.squeeze(0)
     render, hit_mask, hit_indices = sample_IBL(x, d, abc, texture.cuda())
-    
     # Select x and d for sampling scene, no need to resample scene where ray-screen intersection already exists
-    x_, d_ = x[~hit_mask], d[~hit_mask]
-    # Do ray-scene intersection
-    scene_color = None
+    # x_, d_ = x[~hit_mask], d[~hit_mask]
     
-    render[~hit_mask] = scene_color
+    """Ray-Scene Intersection w/ masked origin and directions
+    """
+    # Generate triangle primitives from Gaussian
+    if update_verts:
+        mag, dirs = pc.get_covmat
+        verts, colors = generate_triangles(means3D, mag, dirs, colors, opacity)
+        verts = verts.detach()
+    else:
+        verts = None
+    # Forward through runner
+    buffer_image = RaycastSTE.apply(x,d,N,colors, verts, optix_runner, update_verts)
     
-    return render 
+
+    render = render.permute(1,2,0)
+    render[~hit_mask] = buffer_image[~hit_mask]
+    
+    return render
 
 @torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None):
@@ -220,7 +291,11 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
     extras = None
 
     time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
-    means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc, time)
+    
+    if view_args["finecoarse_flag"]:
+        means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc, time)
+    else:
+        means3D, rotation, opacity, colors, scales, invariance = process_overfit_Gaussians(pc, time)
     if view_args["stage"] == "ba":
         scales *= 0.005
 
@@ -321,64 +396,21 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     """
     time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
     means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc, time)
+    
+    x, d = viewpoint_camera.generate_rays(ctype="tris")
+
     mag, dirs = pc.get_covmat
-    # verts = torch.cat([means, tangents], dim=1)
+    verts, colors = generate_triangles(means3D, mag, dirs, colors, opacity)
+    verts = verts.detach()
+    N = 4
+    # Forward through runner
+    buffer_image = RaycastSTE.apply(x, d, N, colors, verts, optix_runner, False)
     
-    # Determine the point in local Gaussian space where the curve of the 2-D Gaussian in the top-right (positive x-y) quadrant
-    #  reached y=-x
-    # c = 3.218875825 # fixed confidence at 0.8 
-    # mag_sq = mag **2
-    # a_prime = mag_sq[:, 0] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
-    # b_prime = mag_sq[:, 1] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
-    # print(a_prime.shape, mag.shape)
-    # exit()
-    signs = torch.tensor([[1, 1],
-                      [-1, 1],
-                      [1, -1],
-                      [-1, -1]], device=mag.device, dtype=mag.dtype)
 
-    # Expand for broadcasting: (N, 4, 2, 3)
-    reflected = means3D.unsqueeze(1).unsqueeze(1) + (signs.unsqueeze(0).unsqueeze(-1) * mag.unsqueeze(1).unsqueeze(-1) * dirs.unsqueeze(1))
-
-    # reflected: (N, 4, 2, 3)
-    # Concatenate the center point to each reflected triangle
-    tris = torch.cat([means3D.unsqueeze(1).unsqueeze(1).expand(-1, 4, -1, -1), reflected], dim=2)  # (N, 4, 3, 3)
-
-    # Flatten all triangles
-    verts = tris.reshape(-1, 3)
-    
-    rays_o, rays_d = viewpoint_camera.generate_rays()
-
-    verts0 = cp.from_dlpack(torch.utils.dlpack.to_dlpack(verts))
-    
-    optix_runner.update_gas(verts0)
-    
-    hitIndices = optix_runner(rays_o, rays_d)
-    buffer_hitIndices = torch.utils.dlpack.from_dlpack(hitIndices).int()//4 # /255.
-    
-    buffer_image = colors[buffer_hitIndices,0]
     # buffer_image[buffer_hitIndices > 0] *= 0.
     # buffer_image[buffer_hitIndices > 0] += 1.
     
     return buffer_image
-
-    
-    # Render
-    render, alpha, _ = rendering_pass(
-        means3D, rotation, scales, opacity, colors, invariance,
-        viewpoint_camera, 
-        pc.active_sh_degree,
-        mode='RGB'
-    )
-    
-
-    render = render.squeeze(0).permute(2,0,1)
-    
-    ibl = render_IBL_source(viewpoint_camera, abc, texture)
-    alpha = alpha.squeeze(-1)
-    render = render * (alpha) + (1-alpha) * ibl
-
-    return render
 
 
 def render_batch(viewpoint_camera, pc):
@@ -389,16 +421,24 @@ def render_batch(viewpoint_camera, pc):
     time = torch.tensor(viewpoint_camera.time).to(pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1).detach()
     time = time*0. +viewpoint_camera.time
     
-    means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc, time)
+    means3D, rotation, opacity, colors, scales, invariance = process_overfit_Gaussians(pc, time)
     
     # Set up rasterization configuration
-    rgb, _, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
+    #      return: colors, alphas, (normals, surf_normals, distort, median_depth, meta)
+    rgb, alpha, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
     rgb = rgb.squeeze(0).permute(2,0,1)
     
-    return rgb, meta[-1]
+    # Masked loss
+    mask = viewpoint_camera.sceneoccluded_mask.cuda()
+    alpha = alpha.squeeze(-1)
+    alpha_err = (mask - alpha).abs().mean()
+    
+    # Depth norm - Surface norm loss
+    normal_err = (1 - (meta[0] * meta[1]).sum(dim=0))[None].mean()
+    return rgb, meta[-1], normal_err, alpha_err
 
 
-def render_extended(viewpoint_camera, pc, abc, texture):
+def render_extended(viewpoint_camera, pc, abc, texture, optix_runner):
     """Main Rendering function
     
     Algorithm:
@@ -422,28 +462,40 @@ def render_extended(viewpoint_camera, pc, abc, texture):
     # time = torch.tensor(viewpoint_camera.time).to(pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1).detach()
     # time = time*0. +viewpoint_camera.time
     
-    means3D, rotation, opacity, colors, scales, invariance, reflection = process_Gaussians_extended(pc)
+    means3D, rotation, opacity, colors, scales, invariance, reflection, refraction = process_Gaussians_extended(pc)
     
     # 1. G-Render c and l seperately
     #   c
     base_color, _, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
     #   l
-    base_intensity, _, _ = rendering_base_intensity(means3D, rotation, scales, opacity, invariance, viewpoint_camera, pc.active_sh_degree)
+    base_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, invariance, viewpoint_camera, pc.active_sh_degree)
     
     #   a
-    reflection_intensity, _, _ = rendering_base_intensity(means3D, rotation, scales, opacity, reflection, viewpoint_camera, pc.active_sh_degree)
+    reflection_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, reflection, viewpoint_camera, pc.active_sh_degree)
     
+    refraction_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, refraction, viewpoint_camera, pc.active_sh_degree)
+
     # We now need to process the reflection and transmission (mainly different in how d_i is calculated)
     # 1. Reflection di' = di - 2 (di - n)n
     xi, d, norms = render_multi_feature(means3D, rotation, scales, opacity, viewpoint_camera, pc.active_sh_degree)
     di = d - 2.*(d-norms)*norms
     
+    # 1. Refraction dr' = eta*di + (eta cosi - cosr)n, where eta = 1/n_material and cosi = -n.di and cosr = sqrt(1-eta^2 (1-cos^2i))
+    n_mat = 1
+    eta = 1/n_mat
+    cosi = -(norms*d).sum(dim=-1, keepdim=True)
+    dr = eta * d + (eta * cosi - torch.sqrt(torch.clamp( (1 - eta**2 * (1 - cosi**2)), min=1e-8))) * norms
+    dr = dr / (dr.norm(dim=-1, keepdim=True) + 1e-8)
+
     # R-Render Pass
-    reflection_color = r_render(xi, di, norms, abc, texture)
-    transmission_color = r_render(xi, di, norms, abc, texture)
+    reflection_color = r_render(xi, di, norms, abc, texture, optix_runner, means3D, pc, colors,opacity, update_verts=True)
+    
+    transmission_color = r_render(xi, dr, norms, abc, texture, optix_runner, means3D, pc, colors, opacity)
+    
+    # transmission_color =  r_render(xi, di, norms, abc, texture, optix_runner, means3D, rotation, opacity, colors, scales)
     
     # Rendering function
-    rgb = (base_color*base_intensity) + (1.-base_intensity)*((reflection_intensity*reflection_color) + (1.-reflection_intensity)*transmission_color)
+    rgb = (base_color*base_intensity) + (1.-base_intensity)*((reflection_intensity*reflection_color) + (1.-reflection_intensity)*(base_color*refraction_intensity + (1.-refraction_intensity)*transmission_color))
     # Set up rasterization configuration
     rgb = rgb.squeeze(0).permute(2,0,1)
     

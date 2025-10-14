@@ -38,6 +38,7 @@ class TrainABC(nn.Module):
         self.abc = nn.Parameter(abcd[[3,2,0]].to(device))
         self.H, self.W = H, W
         self.background_texture = background_texture
+    
     def forward(self):
-        return self.abc
+        return self.abc 
 

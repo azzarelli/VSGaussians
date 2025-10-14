@@ -151,11 +151,13 @@ class OptixTriangles(nn.Module):
 
         return output_image #cp.asnumpy(output_image)
        
-    def forward(self, o, d):
+    def forward(self, o, d, N, colors, verts, update_verts):
         """Intersect ray with screen or scene
         """
+        # if update_verts or self.gas is None:
+        self.update_gas(cp.from_dlpack(torch.utils.dlpack.to_dlpack(verts)))
+        
         H,W = o.shape[0], o.shape[1]
-        print("Vertices:", self.vertices.shape, self.vertices.dtype)
         # Build launch params
         params_tmp = [
             ('u8', 'image'),
@@ -194,4 +196,29 @@ class OptixTriangles(nn.Module):
 
         stream.synchronize()
 
-        return output_image
+        buffer_hitIndices = torch.utils.dlpack.from_dlpack(output_image).int()//N
+        
+        buffer_image = colors[buffer_hitIndices,0]
+        buffer_image[buffer_hitIndices < 0, ...] = 0.*buffer_image[buffer_hitIndices < 0, ...] + 1.
+        return buffer_image
+    
+    
+    import torch
+
+class RaycastSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, o, d, N, colors, verts, renderer, update):
+        with torch.no_grad():
+            # Run your non-differentiable forward
+            out = renderer.forward(o, d, N, colors, verts, update)
+        ctx.save_for_backward(o, d)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        o, d = ctx.saved_tensors
+        # Straight-through: pass gradients directly as if identity
+        grad_o = grad_output.clone()
+        grad_d = grad_output.clone()
+        # Optionally scale or mask them depending on use case
+        return grad_o, grad_d, None, None, None, None, None

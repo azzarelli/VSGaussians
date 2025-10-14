@@ -34,8 +34,8 @@ class Scene:
                 self.loaded_iter = load_iteration
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
-        max_frames = 100
-        num_cams = 3
+        max_frames = 98
+        num_cams = 14
         scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path)
         dataset_type="condense"
         
@@ -44,7 +44,7 @@ class Scene:
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
         
-        self.train_camera = scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
+        self.train_camera = FourDGSdataset(scene_info.train_cameras, self.dataset_type) #scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
         self.test_camera = FourDGSdataset(scene_info.test_cameras, dataset_type)
         self.ba_camera = FourDGSdataset(scene_info.ba_cameras, dataset_type)
 

@@ -22,7 +22,7 @@ class GUIBase:
         self.view_test = view_test
         
         # Set the width and height of the expected image
-        self.W, self.H = self.scene.train_camera[0].width, self.scene.train_camera[0].height
+        self.W, self.H = self.scene.train_camera[0].image_width, self.scene.train_camera[0].image_height
 
         if self.H > 1200 and self.scene != "dynerf":
             self.W = self.W//2
@@ -57,15 +57,16 @@ class GUIBase:
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         
         self.trainable_abc = None
-        
-        if bundle_adjust and view_test == False :
-            self.run_bundle_adjustment()
-            self.init_optix()        
-            # self.test_optix()
-        elif self.gui:
+        if self.gui:
             print('DPG loading ...')
             dpg.create_context()
             self.register_dpg()
+            
+        if bundle_adjust and view_test == False :
+            # self.run_bundle_adjustment()
+            self.init_optix()        
+            # self.test_optix()
+        
 
     def init_optix(self):
         print('Running Optix Viewer Test...')
@@ -73,77 +74,7 @@ class GUIBase:
 
         self.optix_runner = OptixTriangles()
         
-        
-    def test_optix(self):
-        # Load DPG
-        print('Running Optix Viewer Test...')
-        # dpg.create_context()
-        # self.register_dpg()
 
-        from gaussian_renderer.ray_tracer import OptixTriangles
-        import cupy as cp
-        from PIL import Image, ImageOps
-
-        optix_runner = OptixTriangles()
-        
-        def gen_tris_from_pcd(optix_runner):
-            
-            p0 = self.gaussians.get_xyz
-            # print(p0.shape)
-            # exit()
-            # p0 = p0.mean(0).unsqueeze(0) + p0
-            p1 = p0.clone()
-            # p1[:, 0] += 0.0001
-            # p1[:, 1] += 0.0001 
-            p1[:, 2] += 0.01
-            p2 = p0.clone()
-            p2[:, 1] += 0.01
-            # p2[:, 1] += 0.0001
-            
-            # colors = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
-            
-            tris0 = torch.cat([
-                p0.unsqueeze(1),p1.unsqueeze(1), p2.unsqueeze(1),
-                ], dim=1).view(-1, 3)
-
-            # colors = torch.rand(tris0.shape[0], 3, device="cuda")
-            # tris0 = self.scene.ibl.abc.clone().unsqueeze(0).repeat(2,1,1).view(-1, 3)
-
-            tris0 = cp.from_dlpack(torch.utils.dlpack.to_dlpack(tris0))
-            # tris0 = cp.array([[-0.5, -0.5, 0.0],
-            #                  [ 0.5, -0.5, 0.0],
-            #                  [ 0.0,  0.5, 0.0]], dtype=np.float32)
-            optix_runner.update_gas(tris0)
-
-
-        while dpg.is_dearpygui_running():
-            with torch.no_grad():
-                
-                cam = self.free_cams[self.current_cam_index]
-                gen_tris_from_pcd(optix_runner=optix_runner)
-                
-                img = optix_runner.trace(cam)
-                buffer_image = torch.utils.dlpack.from_dlpack(img).float()[:, :, :3] /255.
-                
-                self.buffer_image = (
-                    buffer_image
-                    .contiguous()
-                    .clamp(0, 1)
-                    .contiguous()
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
-
-                dpg.set_value(
-                    "_texture", self.buffer_image
-                )
-                dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")                  
-                dpg.render_dearpygui_frame()
-                cp.cuda.Stream.null.synchronize()
-
-        exit()
-            
     def run_bundle_adjustment(self):
         # Load DPG
         print('Running Bundle Adjustment...')
@@ -370,23 +301,39 @@ class GUIBase:
     def render(self):
         tested = True
         while dpg.is_dearpygui_running():
-
+            
             if self.view_test == False:
                 # Start recording step duration
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                self.iter_start.record()
+                
+                viewpoint_cams = self.get_batch_views
 
+                for cam in viewpoint_cams:
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    self.iter_start.record()
+                
+                    if self.stage == 'coarse' and self.iteration < 3000:
+                        self.train_coarse_step(cam)
+                    elif self.stage == 'fine' and self.iteration <= self.final_iter:
+                        self.train_step(cam)
+                    else:
+                        print('Initializing fine training...')
+                        self.stage = 'fine'
+                        self.iteration = 0
 
-                if self.iteration <= self.final_iter:
-                    self.train_step()
                     self.iteration += 1
 
-
-                if self.iteration > self.final_iter:
-                    self.stage = 'done'
-                    dpg.stop_dearpygui()
-                
+                    if self.iteration > self.final_iter:
+                        self.stage = 'done'
+                        dpg.stop_dearpygui()
+                        
+                    with torch.no_grad():
+                        self.viewer_step()
+                        dpg.render_dearpygui_frame()
+            else:
+                with torch.no_grad():
+                    self.viewer_step()
+                    dpg.render_dearpygui_frame()    
                 
             self.iter_end.record()
             
@@ -403,9 +350,6 @@ class GUIBase:
 
                 self.timer.start()
                 
-            with torch.no_grad():
-                self.viewer_step()
-                dpg.render_dearpygui_frame()
         dpg.destroy_context()
  
     @torch.no_grad()
@@ -414,6 +358,7 @@ class GUIBase:
         if self.switch_off_viewer == False:
             self.scene.ba_camera.loading_flags["image"] = True
             self.scene.ba_camera.loading_flags["glass"] = False
+            self.scene.ba_camera.loading_flags["invariance"] = False
             self.scene.ba_camera.loading_flags["scene_occluded"] = True if self.show_mask == "occ" else False
             self.scene.ba_camera.loading_flags["scene"] = True if self.show_mask == "scene" else False
             
@@ -440,7 +385,8 @@ class GUIBase:
                         texture,
                         view_args={
                             "vis_mode":self.vis_mode,
-                            "stage":self.stage
+                            "stage":self.stage,
+                            "finecoarse_flag":self.finecoarse_flag
                         },
                 )
 
@@ -510,7 +456,8 @@ class GUIBase:
         
         # Add _log_view_camera
         dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")
-        dpg.set_value("_log_infer_time", f"{1./(t1-t0)} ")
+        if 1./(t1-t0) < 500:
+            dpg.set_value("_log_infer_time", f"{1./(t1-t0)} ")
 
     def save_scene(self):
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))

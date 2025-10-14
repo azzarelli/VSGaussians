@@ -16,8 +16,9 @@ from utils.timer import Timer
 
 from utils.loss_utils import l1_loss
 
-from gaussian_renderer import render_batch, render
+from gaussian_renderer import render_batch, render, render_extended
 
+from torch.cuda.amp import autocast, GradScaler
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 import matplotlib.pyplot as plt
@@ -85,6 +86,7 @@ class GUI(GUIBase):
         # Initialize DPG      
         super().__init__(use_gui, scene, gaussians, self.expname, view_test, bundle_adjust)
 
+        
         # Initialize training
         self.timer = Timer()
         self.timer.start()
@@ -119,40 +121,33 @@ class GUI(GUIBase):
             print('Loading dataset..')
             # Set the data we want to use from this dataset
             self.scene.train_camera.loading_flags["image"] = True
-            self.scene.train_camera.loading_flags["glass"] = False
             self.scene.train_camera.loading_flags["scene_occluded"] = True
-            self.scene.train_camera.loading_flags["scene"] = False
-            
+
+
             self.viewpoint_stack = self.scene.train_camera
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list))
-    
+                                                num_workers=4, collate_fn=list))
     @property
     def get_batch_views(self, stack=None):
         self.scene.train_camera.loading_flags["image"] = True
-        self.scene.train_camera.loading_flags["glass"] = False
         self.scene.train_camera.loading_flags["scene_occluded"] = True
-        self.scene.train_camera.loading_flags["scene"] = False
             
         try:
             viewpoint_cams = next(self.loader)
         except StopIteration:
             viewpoint_stack_loader = DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
+                                                num_workers=4, collate_fn=list, persistent_workers=False, pin_memory=False,)
             self.loader = iter(viewpoint_stack_loader)
             viewpoint_cams = next(self.loader)
         
         return viewpoint_cams
 
-    def train_step(self):
-
+    def train_coarse_step(self, viewpoint_cams):
         
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
-        
-           
-        viewpoint_cams = self.get_batch_views[0]
 
-        rgb, info = render_batch(
+       
+        rgb, info, normal_err, alpha_err = render_batch(
             viewpoint_cams, 
             self.gaussians,
         )
@@ -161,12 +156,50 @@ class GUI(GUIBase):
         
         gt_img = viewpoint_cams.image.cuda() * (viewpoint_cams.sceneoccluded_mask.cuda())
         
-        # with torch.no_grad():
-        #     img = viewpoint_cams.image.permute(1, 2, 0).detach().cpu().numpy()
-        #     img = img.clip(0, 1)
-        #     plt.imshow(img)
-        #     plt.axis("off")
-        #     plt.show()
+        loss = l1_loss(rgb, gt_img) +  self.opt.lambda_alpha * alpha_err #self.opt.lambda_normal * normal_err +
+        with torch.no_grad():
+            if self.gui:
+                    dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
+                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
+                    dpg.set_value("_log_depth", f"Norm Loss: {self.opt.lambda_normal * normal_err.item()}")
+                    dpg.set_value("_log_opacs", f"Alpha/Mask Loss: {self.opt.lambda_alpha * alpha_err.item()}")
+                    # dpg.set_value("_log_dynscales", f"Inv Loss: {self.opt.lambda_inv * inv_err.item()}")
+                    dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
+
+            
+            # Error if loss becomes nan
+            if torch.isnan(loss).any():
+                    
+                print("loss is nan, end training, reexecv program now.")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+                
+        # Backpass
+        loss.backward()
+
+        self.gaussians.post_backward(self.iteration, info)
+
+    
+    def train_step(self, viewpoint_cams):
+        
+        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
+        
+        abc = self.scene.ibl.abc.cuda()
+                
+        id1 = int(viewpoint_cams.time*100)
+        texture = self.scene.ibl[id1].cuda()
+        
+        rgb, info = render_extended(
+            viewpoint_cams, 
+            self.gaussians,
+            abc,
+            texture,
+            self.optix_runner
+        )
+        
+        self.gaussians.pre_backward(self.iteration, info)
+        
+        gt_img = viewpoint_cams.image.cuda() * (viewpoint_cams.sceneoccluded_mask.cuda())
+
         loss = l1_loss(rgb, gt_img)
 
         # planeloss = self.gaussians.compute_regulation(

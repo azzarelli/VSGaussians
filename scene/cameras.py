@@ -51,9 +51,7 @@ class Camera(nn.Module):
 
                  image_path=None,
                  sceneoccluded_path=None,
-                 scene_path=None,
-                 glass_path=None,
-                 
+
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  ):
         super(Camera, self).__init__()
@@ -90,13 +88,9 @@ class Camera(nn.Module):
         #
         self.image_path=image_path
         self.sceneoccluded_path=sceneoccluded_path
-        self.scene_path=scene_path
-        self.glass_path=glass_path
-        
+
         self.image = None
         self.sceneoccluded_mask = None
-        self.scene_mask = None
-        self.glass_mask = None
         
     @property
     def intrinsics(self): # Get the intrinsics matric
@@ -116,7 +110,7 @@ class Camera(nn.Module):
         C2W = torch.from_numpy(np.linalg.inv(Rt)).cuda().float()
         return C2W
 
-    def generate_rays(self, c2w=None, H=None, W=None, fx=None, fy=None, cx=None, cy=None, device="cuda"):
+    def generate_rays(self, c2w=None, H=None, W=None, fx=None, fy=None, cx=None, cy=None, device="cuda", ctype="none"):
         if H is None or W is None:
             H, W = self.image_height, self.image_width
 
@@ -134,9 +128,14 @@ class Camera(nn.Module):
         jj, ii = torch.meshgrid(j, i, indexing="ij")  # [H,W]
 
         # Camera-space ray directions (OpenGL convention: +y up, -z forward)
-        x = (ii - cx) / fx
-        y = (jj - cy) / fy
-        z = torch.ones_like(x)
+        if ctype=="tris":
+            x = (ii - cx) / fx
+            y = (jj - cy) / fy
+            z = torch.ones_like(x)
+        else:
+            x = -(ii - cx) / fx
+            y = -(jj - cy) / fy
+            z = -torch.ones_like(x)
         dirs_cam = torch.stack([x, y, z], dim=-1)  # [H,W,3]
         dirs_cam = dirs_cam #/ torch.norm(dirs_cam, dim=-1, keepdim=True)
 
@@ -202,15 +201,7 @@ class Camera(nn.Module):
             self.image = TRANSFORM(
                 Image.open(self.image_path).convert("RGB")
             )
-        elif tag == "scene":
-            self.scene_mask = TRANSFORM(
-                Image.open(self.scene_path).split()[-1]
-            )
         elif tag == "scene_occluded":
-            self.sceneoccluded_mask = TRANSFORM(
+            self.sceneoccluded_mask = 1.- TRANSFORM(
                 Image.open(self.sceneoccluded_path).split()[-1]
-            )
-        elif tag == "scene":
-            self.glass_mask = TRANSFORM(
-                Image.open(self.glass_path).split()[-1]
             )

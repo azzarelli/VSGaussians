@@ -5,44 +5,6 @@ from scene.waveplanes import WavePlaneField
 
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
-# Source: https://www.image-engineering.de/library/technotes/958-how-to-convert-between-srgb-and-ciexyz
-RGB2XYZ = torch.tensor([
-        [0.4124564, 0.3575761, 0.1804375],
-        [0.2126729, 0.7151522, 0.0721750],
-        [0.0193339, 0.1191920, 0.9503041],
-    ], dtype=torch.float).cuda()  # shape (3, 3)
-
-XYZ2RGB = torch.tensor([
-        [ 3.2404542, -1.5371385, -0.4985314],
-        [-0.9692660,  1.8760108,  0.0415560],
-        [ 0.0556434, -0.2040259,  1.0572252],
-    ], dtype=torch.float).cuda()  # shape (3, 3)
-
-
-def rgb_to_xyz(rgb):
-    threshold = 0.04045
-    rgb_linear = torch.where(
-        rgb <= threshold,
-        rgb / 12.92,
-        ((rgb + 0.055) / 1.055) ** 2.4
-    )
-    
-    xyz = torch.matmul(rgb_linear, RGB2XYZ.T)
-
-    return xyz
-
-def xyz_to_rgb(xyz):
-    rgb_linear = torch.matmul(xyz, XYZ2RGB.T)
-
-    threshold = 0.0031308
-    rgb =  torch.where(
-        rgb_linear <= threshold,
-        12.92 * rgb_linear,
-        1.055 * (rgb_linear.clamp(min=1e-8) ** (1/2.4)) - 0.055
-    )
-
-    return rgb.clamp(0.0, 1.0) 
-
 class Deformation(nn.Module):
     def __init__(self, W=256, args=None):
         super(Deformation, self).__init__()
@@ -74,7 +36,7 @@ class Deformation(nn.Module):
         net_size = self.W
         self.spacetime_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
 
-        self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1), nn.Sigmoid())
+        # self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1), nn.Sigmoid())
         self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*3))
     
     def query_spacetime(self, rays_pts_emb, time):
@@ -93,7 +55,7 @@ class Deformation(nn.Module):
         dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
         
         inv_emb = inv_emb.unsqueeze(-1)
-        shs = shs_emb*inv_emb + (1.-inv_emb)*self.shs_deform(dyn_feature).view(-1, 16, 3)
+        shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
         
         return rays_pts_emb, rotations_emb, h_emb, shs, None
     
