@@ -14,7 +14,7 @@ class FourDGSdataset(Dataset):
         
         self.loading_flags = {
             "image":True,
-            "scene_occluded":False,
+            "scene_occluded": False if dataset_type == 'canon' else True
             
         }
         

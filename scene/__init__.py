@@ -36,7 +36,7 @@ class Scene:
 
         max_frames = 98
         num_cams = 14
-        scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path)
+        scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path, max_frames)
         dataset_type="condense"
         
         self.maxframes = max_frames
@@ -44,9 +44,12 @@ class Scene:
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
         
-        self.train_camera = FourDGSdataset(scene_info.train_cameras, self.dataset_type) #scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
-        self.test_camera = FourDGSdataset(scene_info.test_cameras, dataset_type)
-        self.ba_camera = FourDGSdataset(scene_info.ba_cameras, dataset_type)
+        self.train_camera = FourDGSdataset(scene_info.train_cameras, "train") #scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
+        self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
+        
+        self.canonical_camera = FourDGSdataset(scene_info.canonical_cameras*3, "canon") # tripple the array of cameras so dataset has to do less work reloading 
+        
+        self.ba_camera = FourDGSdataset(scene_info.ba_cameras, "bundle_adjust")
 
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
         self.ibl = IBLBackround(scene_info.background_pth_ids)

@@ -34,6 +34,7 @@ class CameraInfo(NamedTuple):
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: list
+    canonical_cameras: list
     test_cameras:list
     ba_cameras:list
     video_cameras: list
@@ -336,7 +337,7 @@ OPENGL = np.array([[1, 0, 0, 0],
                    [0, 0, -1, 0],
                    [0, 0, 0, 1]])
 
-def readStudioCams(path, cams2world, focal, H, W, xyz):    
+def readStudioCams(path, cams2world, focal, H, W, xyz, N):    
     path2imgs = os.path.join(path, 'images')
     cams = sorted(os.listdir(path2imgs))
 
@@ -362,84 +363,102 @@ def readStudioCams(path, cams2world, focal, H, W, xyz):
     background_pth_ids = []
     cnt = 0
     for idx, pose in enumerate(cams2world_aligned):
-        N = len(os.listdir(os.path.join(path2imgs, cams[idx])))
         for ids, im_name in enumerate(sorted(os.listdir(os.path.join(path2imgs, cams[idx])))):
-            if ids == 0:
-                image_path = os.path.join(path2imgs, cams[idx], im_name)
-                so_path = os.path.join(path, "meta", "masks", f"{cams[idx]}.png")
-                b_path = os.path.join(path, "meta", "backgrounds", f"{im_name[:-4]}.png")
+            image_path = os.path.join(path2imgs, cams[idx], im_name)
+            so_path = os.path.join(path, "meta", "masks", f"{cams[idx]}.png")
+            b_path = os.path.join(path, "meta", "backgrounds", f"{im_name[:-4]}.png")
 
-                w2c = np.linalg.inv(pose)
-                R = pose[:3,:3] # rotation
-                T = w2c[:3,3] 
-                
-                cx =  W / 2.0
-                cy = H / 2.0
-                fx = 0.5 * W / np.tan(fovx * 0.5)
-                fy = 0.5 * H / np.tan(fovy * 0.5)
-                
-                w = W
-                h = H
+            w2c = np.linalg.inv(pose)
+            R = pose[:3,:3] # rotation
+            T = w2c[:3,3] 
+            
+            cx =  W / 2.0
+            cy = H / 2.0
+            fx = 0.5 * W / np.tan(fovx * 0.5)
+            fy = 0.5 * H / np.tan(fovy * 0.5)
+            
+            w = W
+            h = H
 
-                cam_infos.append(
-                    CameraInfo(
-                        R=R, T=T,
-                        cx=cx, cy=cy, fx=fx, fy=fy,
-                        width=w, height=h,
-                        
-                        image_path=image_path, 
-                        so_path=so_path,b_path=b_path,
-                        
-                        uid=cnt,
-                        time = float(ids%N)/N, feature=0.
-                    )
+            cam_infos.append(
+                CameraInfo(
+                    R=R, T=T,
+                    cx=cx, cy=cy, fx=fx, fy=fy,
+                    width=w, height=h,
+                    
+                    image_path=image_path, 
+                    so_path=so_path,b_path=b_path,
+                    
+                    uid=cnt,
+                    time = float(ids%N)/N, feature=0.
                 )
-                background_pth_ids.append(b_path)
-                cnt +=1
+            )
+            background_pth_ids.append(b_path)
+            cnt +=1
     return cam_infos, xyz, background_pth_ids
 
 
-def readCorrectedStudioCams(path, cams2world, focal, H, W):    
-    cams = ['cam00','cam01', 'cam02', 'cam03']
-    print(f"Cam Intrinsics: {H} H x {W} W | {focal} (fovx, fovy)")
-    fovx = focal[0] #focal2fov( W)
-    fovy = focal[1] #focal2fov(focal[1], H)
+def readCanonicalCams(path, cams2world, focal, H, W):    
+    path2imgs = os.path.join(path, 'meta', 'canonical_0')
+    cams = sorted(os.listdir(path2imgs))
+
+    # upsample intrinsics to match the original image
+    focal = focal * 3.75
+    W = 1920
+    H = 1080
+    
+    fovx = focal2fov(focal, W)
+    fovy = focal2fov(focal, H)
     cam_infos = []
 
-    im_name = 'image_001.png'
-    for idx, pose in enumerate(cams2world):
-        image_path = os.path.join(path, cams[idx], im_name)
-        so_path = os.path.join(path,'masks/scene_ocluded_masks', f'{cams[idx]}.png')
-        s_path = os.path.join(path,'masks/scene_masks', f'{cams[idx]}.png')
-        g_path = os.path.join(path,'masks/glass_masks', f'{cams[idx]}.png')
-        b_path = os.path.join(path,'cropped_images', im_name)
+    rot = np.eye(4)
+    rot[:3, :3] = Rotation.from_euler('y', np.deg2rad(180)).as_matrix()
+    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
+    cams2world_aligned = [ (global_T @ c2w) for c2w in cams2world ]
+    
+    for idx, pose in enumerate(cams2world_aligned):
+        # Construct path to canonical image
+        image_path = os.path.join(path2imgs, f"{cams[idx]}")
 
-        # M = np.diag([1, -1, -1, 1]).astype(np.float32)
-        # pose = M @ pose @ M
+        # Define the camera calibration settings
         w2c = np.linalg.inv(pose)
-        R = w2c[:3,:3]  # rotation
+        R = pose[:3,:3]
         T = w2c[:3,3] 
-
-        FovY = fovy 
-        FovX = fovx
+        
+        cx =  W / 2.0
+        cy = H / 2.0
+        fx = 0.5 * W / np.tan(fovx * 0.5)
+        fy = 0.5 * H / np.tan(fovy * 0.5)
+        
         w = W
         h = H
 
-        cam_infos.append(CameraInfo(uid=idx,c2w=pose, R=R, T=T, FovY=FovY, FovX=FovX, image=None,
-                        image_path=image_path, image_name=f'{idx}', width=w, height=h,
-                        so_path=so_path, s_path=s_path, g_path=g_path,b_path=b_path,
-                        time = 0., mask=None, verts=None, feature=0.))
-    
+        cam_infos.append(
+            CameraInfo(
+                R=R, T=T,
+                cx=cx, cy=cy, fx=fx, fy=fy,
+                width=w, height=h,
+                
+                image_path=image_path, 
+                so_path=None,b_path=None,
+                
+                uid=idx,
+                time = 0., feature=0.
+            )
+        )
+
     return cam_infos
 
-def readHomeStudioInfo(path):
+
+
+def readHomeStudioInfo(path, N=98):
     print("Reading Training Data")
+    # Load camera data (generated from mast3r)
     meta_pth = os.path.join(path, 'meta', 'info.json')
     with open(meta_pth, "r") as f:
         meta = json.load(f)
-    
-    
-    # Get the camera pose data
+
+    # Camera pose data
     focal = meta['focals'][0] # shared intrinsics
     W,H = meta['imsize'][0][0], meta['imsize'][0][1]
     poses = meta['cams2world']
@@ -447,21 +466,24 @@ def readHomeStudioInfo(path):
     for pose in poses:
         c2w.append(np.array(pose))
     
+    # Load initial point cloud and colors
     pcd_path = os.path.join(path, 'meta', 'pointcloud.npy')
     pcd = np.load(pcd_path, allow_pickle=True)
-
     pts = pcd[::3, :3]
     col = pcd[::3, 3:]
-    # print(pts.shape)
-    # exit()
-    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts)
+
+    # Get training cameras
+    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N)
     
-    # Split train/test (the third cam (cam 02) is the test camera)
-    #  This corresponds to the 3rd set of 200 cams
-    test_cams = train_cams[:98]
+    # Get canonical cameras
+    canonical_cams = readCanonicalCams(path, c2w, focal, H, W)
+
+    # TODO: Define testing method
+    # For now just use the first camera as test
+    test_cams = train_cams[:N]
     
     # We also need to define a dataset for bundle adjusting the screen and cams
-    BA_cams = [train_cams[i] for i in range(len(train_cams))] # if i % 98 == 0]
+    BA_cams = [train_cams[i] for i in range(len(train_cams)) if i % N == 0]
 
     nerf_normalization = getNerfppNorm(train_cams)
     
@@ -471,8 +493,11 @@ def readHomeStudioInfo(path):
         point_cloud=pcd,
         train_cameras=train_cams,
         test_cameras=test_cams,
-        ba_cameras=BA_cams,
         video_cameras=train_cams,
+
+        canonical_cameras=canonical_cams,
+        ba_cameras=BA_cams,
+        
         nerf_normalization=nerf_normalization,
         background_pth_ids=background_pth_ids
     )

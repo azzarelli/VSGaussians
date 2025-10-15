@@ -16,7 +16,7 @@ from utils.timer import Timer
 
 from utils.loss_utils import l1_loss
 
-from gaussian_renderer import render_batch, render, render_extended
+from gaussian_renderer import render_batch, render_coarse, render, render_extended
 
 from torch.cuda.amp import autocast, GradScaler
 
@@ -118,51 +118,68 @@ class GUI(GUIBase):
         if self.view_test == False:
             self.random_loader  = True
 
+            print('Loading canonical dataset..')
+            self.canonical_viewpoint_stack = self.scene.canonical_camera
+            self.canonical_loader = iter(DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                num_workers=16, collate_fn=list))
+            
             print('Loading dataset..')
-            # Set the data we want to use from this dataset
-            self.scene.train_camera.loading_flags["image"] = True
-            self.scene.train_camera.loading_flags["scene_occluded"] = True
-
 
             self.viewpoint_stack = self.scene.train_camera
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=4, collate_fn=list))
+                                                num_workers=16, collate_fn=list))
+    
     @property
-    def get_batch_views(self, stack=None):
-        self.scene.train_camera.loading_flags["image"] = True
-        self.scene.train_camera.loading_flags["scene_occluded"] = True
-            
+    def get_canonical_views(self): 
+        try:
+            viewpoint_cams = next(self.canonical_loader)
+        except StopIteration:
+            viewpoint_stack_loader = DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
+            self.canonical_loader = iter(viewpoint_stack_loader)
+            viewpoint_cams = next(self.canonical_loader)
+        return viewpoint_cams
+    
+    
+    @property
+    def get_batch_views(self): 
         try:
             viewpoint_cams = next(self.loader)
         except StopIteration:
             viewpoint_stack_loader = DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=4, collate_fn=list, persistent_workers=False, pin_memory=False,)
+                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
             self.loader = iter(viewpoint_stack_loader)
             viewpoint_cams = next(self.loader)
-        
         return viewpoint_cams
 
     def train_coarse_step(self, viewpoint_cams):
+        """Coarse/Canonical Training
         
+        Notes:
+            Trains the canonical representation on un-lit image set. Hence every image from the re-lighting set will have color deformation:
+                c' = c + delta-c_i, where delta-c_i  is the per-background image change in color
+            The idea being, we overfit the canon on the unlit scene and explicitly learn delta-c_i as the change w.r.t known image canon
+            
+            Hence, in this function/step we only train the canon
+        """
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
 
-       
-        rgb, info, normal_err, alpha_err = render_batch(
+        rgb, info, normal_err = render_coarse(
             viewpoint_cams, 
             self.gaussians,
         )
         
         self.gaussians.pre_backward(self.iteration, info)
         
-        gt_img = viewpoint_cams.image.cuda() * (viewpoint_cams.sceneoccluded_mask.cuda())
+        gt_img = viewpoint_cams.image.cuda()
         
-        loss = l1_loss(rgb, gt_img) +  self.opt.lambda_alpha * alpha_err #self.opt.lambda_normal * normal_err +
+        loss = l1_loss(rgb, gt_img) + self.opt.lambda_normal * normal_err
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     dpg.set_value("_log_loss", f"Loss: {loss.item()}")
                     dpg.set_value("_log_depth", f"Norm Loss: {self.opt.lambda_normal * normal_err.item()}")
-                    dpg.set_value("_log_opacs", f"Alpha/Mask Loss: {self.opt.lambda_alpha * alpha_err.item()}")
+                    # dpg.set_value("_log_opacs", f"Alpha/Mask Loss: {self.opt.lambda_alpha * alpha_err.item()}")
                     # dpg.set_value("_log_dynscales", f"Inv Loss: {self.opt.lambda_inv * inv_err.item()}")
                     dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
 
@@ -180,7 +197,20 @@ class GUI(GUIBase):
 
     
     def train_step(self, viewpoint_cams):
+        """Dine/Deformation Training
         
+        Notes:
+            As we follow, c' = c + delta-c_i, and it is assumed c has been over-fit on the un-lit training set,
+            We begin to also train the deformation functionality, leaving only the deformation method in the computational graph
+            I.e. We "detach" the canonical parameters from this stage and backprop the loss based on the learned deformation
+            
+            The deformation follows the process of:
+                1. Sampling a tri-plane grid to retrive continuous indexes (0<a<1 and 0<b<1)
+                2. Scaling a,b to the backgground (cropped) image
+                3. Mip-map sampling (again using torch grid_sampling)
+                4. Processing the new color as 
+                    c' = l.c + (1-l).c_mipmap
+        """
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
         
         abc = self.scene.ibl.abc.cuda()

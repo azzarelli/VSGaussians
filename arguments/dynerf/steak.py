@@ -32,7 +32,7 @@ OptimizationParams = dict(
     
     lambda_dssim = 0.2,
     lambda_dist = 0.0,
-    lambda_normal = 0.1,
+    lambda_normal = 0.001,
     lambda_alpha=1.,
     lambda_inv=0.1,
     

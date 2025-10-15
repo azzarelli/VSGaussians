@@ -304,8 +304,10 @@ class GUIBase:
             
             if self.view_test == False:
                 # Start recording step duration
-                
-                viewpoint_cams = self.get_batch_views
+                if self.stage == 'coarse':
+                    viewpoint_cams = self.get_canonical_views
+                else:
+                    viewpoint_cams = self.get_batch_views
 
                 for cam in viewpoint_cams:
                     torch.cuda.empty_cache()
@@ -323,10 +325,12 @@ class GUIBase:
 
                     self.iteration += 1
 
+                    # Stop on the final iteration
                     if self.iteration > self.final_iter:
                         self.stage = 'done'
                         dpg.stop_dearpygui()
-                        
+                    
+                    # Load viewer every iteration
                     with torch.no_grad():
                         self.viewer_step()
                         dpg.render_dearpygui_frame()
@@ -357,10 +361,7 @@ class GUIBase:
         t0 = time.time()
         if self.switch_off_viewer == False:
             self.scene.ba_camera.loading_flags["image"] = True
-            self.scene.ba_camera.loading_flags["glass"] = False
-            self.scene.ba_camera.loading_flags["invariance"] = False
             self.scene.ba_camera.loading_flags["scene_occluded"] = True if self.show_mask == "occ" else False
-            self.scene.ba_camera.loading_flags["scene"] = True if self.show_mask == "scene" else False
             
             cam = self.free_cams[self.current_cam_index]
             cam.time = self.time
@@ -411,8 +412,6 @@ class GUIBase:
                 try:
                     if self.show_mask == 'occ':
                         mask = cam.sceneoccluded_mask.squeeze(0).cuda()
-                    elif self.show_mask == 'scene':
-                        mask = cam.scene_mask.squeeze(0).cuda()
                     else:
                         mask = 0.
                     buffer_image[0] += mask*0.5
@@ -569,8 +568,6 @@ class GUIBase:
                     dpg.add_text("no data", tag="_log_view_camera")
                     dpg.add_button(label="Next cam", callback=callback_toggle_next_cam)
 
-                def callback_toggle_scene_mask(sender):
-                    self.show_mask = 'scene'
                 def callback_toggle_sceneocc_mask(sender):
                     self.show_mask = 'occ'
                 def callback_toggle_no_mask(sender):
@@ -578,7 +575,6 @@ class GUIBase:
                     
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="No Mask", callback=callback_toggle_no_mask)
-                    dpg.add_button(label="Scene Mask", callback=callback_toggle_scene_mask)
                     dpg.add_button(label="Occlu Mask", callback=callback_toggle_sceneocc_mask)
                     
                 
