@@ -55,23 +55,15 @@ def interpolate_features_MUL(data, kplanes):
     """
     # time m feature
     space = 1.
-    spacetime = 1.
     
     # q,r are the coordinate combinations needed to retrieve pts
-    coords = [[0,1], [0,2],[3,0], [1,2], [3,1], [3,2]]
+    coords = [[0,1], [0,2], [1,2]]
     for i in range(len(coords)):
         q,r = coords[i]
         feature = kplanes[i](data[..., (q, r)])
-        # feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
-        # feature = torch.prod(feature, dim=1)
+        space = space * feature
 
-        if i in [0,1,3]:
-            space = space * feature
-
-        elif i in [2, 4, 5]:
-            spacetime = spacetime * feature
-
-    return space, spacetime
+    return space
    
 
 import matplotlib.pyplot as plt
@@ -146,15 +138,10 @@ class WavePlaneField(nn.Module):
         self.cacheplanes = True
         self.is_waveplanes = True
         
-        for i in range(6):
-            if i in [0,1,3]:
-                what = 'space'
-                res = [self.grid_config['resolution'][0],
-                    self.grid_config['resolution'][0]]
-            else:
-                what = 'spacetime'
-                res = [self.grid_config['resolution'][0],
-                    self.grid_config['resolution'][1]]
+        for i in range(3):
+            res = [self.grid_config['resolution'][0],
+                self.grid_config['resolution'][0]]
+            what = "space"
             
             gridset = GridSet(
                 what=what,
@@ -171,37 +158,6 @@ class WavePlaneField(nn.Module):
             )
 
             self.grids.append(gridset)
-
-        # for i in range(3): # for the color
-        #     what = 'spacetime'
-        #     res = [self.grid_config['resolution'][0], self.grid_config['resolution'][1]]
-            
-        #     gridset = GridSet(
-        #         what=what,
-        #         resolution=res,
-        #         J=self.grid_config['wavelevel'],
-        #         config={
-        #             'feature_size': self.grid_config["output_coordinate_dim"],
-        #             'a': 0.1,
-        #             'b': 0.5,
-        #             'wave': 'coif4',
-        #             'wave_mode': 'periodization',
-        #         },
-        #         cachesig=self.cacheplanes
-        #     )
-        #     self.grids.append(gridset)
-
-
-    def compact_save(self, fp):
-        import lzma
-        import pickle
-        data = {}
-
-        for i in range(6):
-            data[f'{i}'] = self.grids[i].compact_save()
-
-        with lzma.open(f"{fp}.xz", "wb") as f:
-            pickle.dump(data, f)
 
     @property
     def get_aabb(self):
@@ -243,107 +199,11 @@ class WavePlaneField(nn.Module):
 
         return ms_planes
 
-    def forward(self, pts, feature):
+    def forward(self, pts):
                 
         pts = normalize_aabb(pts, self.aabb)
         pts = pts.reshape(-1, 3)
 
-        pts = torch.cat([pts, feature], dim=-1)
         return interpolate_features_MUL(
             pts, self.grids)
 
-
-def display_projection(pts, cov6):
-    B = 5
-    mean = pts[B] 
-    cov_matrix = build_cov_matrix_torch(cov6)[B]
-    
-    cov_xy = cov_matrix[:2, :2]
-    eigvals, _ = torch.linalg.eigh(cov_xy)
-    print("XY Eigenvalues:", eigvals)
-    samples = samples[B]             
-
-    display_covariance_ellipse_and_samples(mean,cov_matrix,samples)
-    
-    
-K_a = -2*torch.log(torch.tensor(0.2)).cuda()
-K_b = -2*torch.log(torch.tensor(0.8)).cuda()
-
-def structured_gaussian_samples(pts, cov6, axis_pdf_thresholds=[0.4, 0.8],):
-    """ Sample gaussians along the major axis of the eigen of the covariances
-        w.r.t the Gaussian function G=exp(-0.5(x-u)^T E^-1 (x-u))
-    """
-    N = pts.shape[0]
-    device = pts.device
-    dtype = pts.dtype
-    with torch.no_grad():
-        cov3x3 = build_cov_matrix_torch(cov6)  # (N, 3, 3)
-        eigenvalues, normals = torch.linalg.eigh(cov3x3) # should be symetric
-        normals = normals.contiguous().view(-1,1, 3).detach() #.unsqueeze(1).repeat(1,3,1)
-        # Get inverse covariance
-        cov_inv = torch.linalg.inv(cov3x3).unsqueeze(1).repeat(1,3,1,1).view(-1, 3, 3)
-        lam = torch.bmm(torch.bmm(normals, cov_inv), normals.transpose(1, 2)).squeeze(-1)  # (N,1,1)
-        
-        normals = normals.squeeze(1)
-        
-        # if we detach this, errors as a result of sampling will relate to point position rather than covariance
-        p_a = torch.sqrt(K_a/lam) * normals
-        p_b = torch.sqrt(K_b/lam) * normals
-    
-        o = pts.unsqueeze(1).repeat(1, 3, 1).view(-1, 3)
-        x_a = (o + p_a).view(-1,3,3)
-        x_b = (o + p_b).view(-1,3,3)
-        x_a_neg = (o - p_a).view(-1,3,3)
-        x_b_neg = (o - p_b).view(-1,3,3)
-    samples = torch.cat([pts.unsqueeze(1), x_a, x_b, x_a_neg, x_b_neg], dim=1)
-    return samples
-    
-
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-def display_covariance_ellipse_and_samples(mean, cov3x3, samples, density_threshold=0.05):
-    """
-    mean: (3,) torch tensor
-    cov3x3: (3, 3) torch tensor
-    samples: (N, 3) torch tensor
-    density_threshold: float, threshold value of the Gaussian PDF
-    """
-    mean = mean.detach().cpu().numpy()
-    cov3x3 = cov3x3.detach().cpu().numpy()
-    samples = samples.detach().cpu().numpy()
-
-    # Project onto XY plane
-    mean_xy = mean[:2]
-    cov_xy = cov3x3[:2, :2]  # 2x2 submatrix
-
-    # --- Compute Mahalanobis threshold (chi2 value) for PDF < density_threshold ---
-    det = np.linalg.det(cov_xy)
-    norm_const = 1.0 / (2 * np.pi * np.sqrt(det))
-    chi2_val = -2 * np.log(density_threshold / norm_const)
-
-    # Eigen-decomposition for ellipse orientation and axis lengths
-    vals, vecs = np.linalg.eigh(cov_xy)
-    order = vals.argsort()[::-1]
-    vals, vecs = vals[order], vecs[:, order]
-
-    width, height = 2 * np.sqrt(vals * chi2_val)  # full width/height
-    angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
-
-    # --- Plot ---
-    fig, ax = plt.subplots()
-    ellipse = Ellipse(xy=mean_xy, width=width, height=height, angle=angle,
-                      edgecolor='red', fc='none', lw=2, label=f'PDF < {density_threshold}')
-
-    ax.add_patch(ellipse)
-
-    ax.plot(mean_xy[0], mean_xy[1], 'ro', label='Mean')
-    ax.scatter(samples[:, 0], samples[:, 1], c='blue', s=20, label='Samples')
-
-    ax.set_aspect('equal')
-    ax.legend()
-    ax.set_title("2D Covariance Ellipse (XY plane) with Samples")
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.grid(True)
-    plt.show()

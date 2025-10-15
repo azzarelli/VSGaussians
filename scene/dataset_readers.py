@@ -337,7 +337,7 @@ OPENGL = np.array([[1, 0, 0, 0],
                    [0, 0, -1, 0],
                    [0, 0, 0, 1]])
 
-def readStudioCams(path, cams2world, focal, H, W, xyz, N):    
+def readStudioCams(path, cams2world, focal, H, W, xyz, N, downsample=2):    
     path2imgs = os.path.join(path, 'images')
     cams = sorted(os.listdir(path2imgs))
 
@@ -348,6 +348,8 @@ def readStudioCams(path, cams2world, focal, H, W, xyz, N):
     
     fovx = focal2fov(focal, W)
     fovy = focal2fov(focal, H)
+    W = 1920 // downsample
+    H = 1080 // downsample
     cam_infos = []
 
     rot = np.eye(4)
@@ -398,7 +400,7 @@ def readStudioCams(path, cams2world, focal, H, W, xyz, N):
     return cam_infos, xyz, background_pth_ids
 
 
-def readCanonicalCams(path, cams2world, focal, H, W):    
+def readCanonicalCams(path, cams2world, focal, H, W, downsample=2):    
     path2imgs = os.path.join(path, 'meta', 'canonical_0')
     cams = sorted(os.listdir(path2imgs))
 
@@ -406,9 +408,11 @@ def readCanonicalCams(path, cams2world, focal, H, W):
     focal = focal * 3.75
     W = 1920
     H = 1080
-    
     fovx = focal2fov(focal, W)
     fovy = focal2fov(focal, H)
+    W = 1920 //downsample
+    H = 1080 //downsample
+    
     cam_infos = []
 
     rot = np.eye(4)
@@ -432,7 +436,6 @@ def readCanonicalCams(path, cams2world, focal, H, W):
         
         w = W
         h = H
-
         cam_infos.append(
             CameraInfo(
                 R=R, T=T,
@@ -451,7 +454,7 @@ def readCanonicalCams(path, cams2world, focal, H, W):
 
 
 
-def readHomeStudioInfo(path, N=98):
+def readHomeStudioInfo(path, N=98, downsample=2):
     print("Reading Training Data")
     # Load camera data (generated from mast3r)
     meta_pth = os.path.join(path, 'meta', 'info.json')
@@ -473,10 +476,10 @@ def readHomeStudioInfo(path, N=98):
     col = pcd[::3, 3:]
 
     # Get training cameras
-    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N)
+    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N, downsample)
     
     # Get canonical cameras
-    canonical_cams = readCanonicalCams(path, c2w, focal, H, W)
+    canonical_cams = readCanonicalCams(path, c2w, focal, H, W, downsample)
 
     # TODO: Define testing method
     # For now just use the first camera as test

@@ -305,23 +305,27 @@ class GUIBase:
             if self.view_test == False:
                 # Start recording step duration
                 if self.stage == 'coarse':
-                    viewpoint_cams = self.get_canonical_views
+                    canon_cams = self.get_canonical_views
+                    viewpoint_cams = [None for c in canon_cams]
                 else:
+                    canon_cams = self.get_canonical_views
                     viewpoint_cams = self.get_batch_views
 
-                for cam in viewpoint_cams:
+                for canon_cam, deform_can in zip(canon_cams, viewpoint_cams):
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     self.iter_start.record()
                 
-                    if self.stage == 'coarse' and self.iteration < 3000:
-                        self.train_coarse_step(cam)
+                    if self.stage == 'coarse' and self.iteration < 2:
+                        self.train_coarse_step(canon_cam)
                     elif self.stage == 'fine' and self.iteration <= self.final_iter:
-                        self.train_step(cam)
+                        self.train_coarse_step(canon_cam)
+                        self.train_step(deform_can)
                     else:
                         print('Initializing fine training...')
                         self.stage = 'fine'
                         self.iteration = 0
+                        break
 
                     self.iteration += 1
 
@@ -547,15 +551,11 @@ class GUIBase:
             with dpg.collapsing_header(label="Rendering", default_open=True):
                 def callback_toggle_show_rgb(sender):
                     self.switch_off_viewer = ~self.switch_off_viewer
-                def callback_toggle_use_controls(sender):
-                    self.switch_off_viewer_args = ~self.switch_off_viewer_args
                 def callback_toggle_finecoarse(sender):
                     self.finecoarse_flag = False if self.finecoarse_flag else True
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Render On/Off", callback=callback_toggle_show_rgb)
-                    dpg.add_button(label="Ctrl On/Off", callback=callback_toggle_use_controls)
-                    dpg.add_button(label="Fine/Coarse", callback=callback_toggle_finecoarse)
-
+                    dpg.add_button(label="Pause/Resume Viewer", callback=callback_toggle_show_rgb)                    
+                    dpg.add_button(label="View Canon/Relit", callback=callback_toggle_finecoarse)
                      
                 def callback_toggle_reset_cam(sender):
                     self.current_cam_index = 0

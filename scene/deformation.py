@@ -34,30 +34,27 @@ class Deformation(nn.Module):
     def create_net(self):
         # Prep features for decoding
         net_size = self.W
-        self.spacetime_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
+        self.spatial_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
 
-        # self.clip_decode = nn.Sequential(nn.ReLU(),nn.Linear(512, 128),nn.ReLU(),nn.Linear(128, 1), nn.Sigmoid())
-        self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*3))
+        self.sample_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 2))
+        self.scaling_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 1))
+        self.invariance_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 1))
     
-    def query_spacetime(self, rays_pts_emb, time):
-        # L2 Norm of CLIP feature
-        # time = time / time.norm(dim=-1, keepdim=True)
-
-        # feature = self.clip_decode(time.cuda())
-
-        space, spacetime = self.grid(rays_pts_emb[:,:3], time.cuda())
-        st = self.spacetime_enc(space * spacetime)
+    def query_spacetime(self, rays_pts_emb):
+        space = self.grid(rays_pts_emb[:,:3])
+        st = self.spatial_enc(space)
         return st
     
     
-    def forward(self,rays_pts_emb, rotations_emb, scale_emb, shs_emb, inv_emb, view_dir, time_emb, h_emb):
+    def forward(self,rays_pts_emb):
 
-        dyn_feature = self.query_spacetime(rays_pts_emb, time_emb)
-        
-        inv_emb = inv_emb.unsqueeze(-1)
-        shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
-        
-        return rays_pts_emb, rotations_emb, h_emb, shs, None
+        dyn_feature = self.query_spacetime(rays_pts_emb)
+
+        samples = torch.sigmoid(self.sample_decoder(dyn_feature))
+        invariance = torch.sigmoid(self.invariance_decoder(dyn_feature))
+        scaling = torch.sigmoid(self.scaling_decoder(dyn_feature))
+
+        return samples, scaling, invariance
     
     def get_mlp_parameters(self):
         parameter_list = []
@@ -83,17 +80,10 @@ class deform_network(nn.Module):
 
         self.apply(initialize_weights)
 
-    def forward(self, point, rotations=None, scales=None,invariance=None, shs=None,view_dir=None, times_sel=None, h_emb=None, iteration=None):
+    def forward(self, point):
 
         return  self.deformation_net(
             point,
-            rotations,
-            scales,
-            shs,
-            invariance,
-            view_dir,
-            times_sel, 
-            h_emb=h_emb, 
         )
 
     def get_mlp_parameters(self):

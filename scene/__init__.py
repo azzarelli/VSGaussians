@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, skip_coarse=None, max_frames=50):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, skip_coarse=None, max_frames=50, downsample=2):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -36,7 +36,7 @@ class Scene:
 
         max_frames = 98
         num_cams = 14
-        scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path, max_frames)
+        scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path, max_frames, downsample=downsample)
         dataset_type="condense"
         
         self.maxframes = max_frames
@@ -52,6 +52,7 @@ class Scene:
         self.ba_camera = FourDGSdataset(scene_info.ba_cameras, "bundle_adjust")
 
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
+        
         self.ibl = IBLBackround(scene_info.background_pth_ids)
         
         self.point_cloud = scene_info.point_cloud

@@ -198,10 +198,17 @@ class Camera(nn.Module):
     
     def load_image_from_flags(self, tag):
         if tag == "image":
-            self.image = TRANSFORM(
-                Image.open(self.image_path).convert("RGB")
-            )
+            img = Image.open(self.image_path).convert("RGB")
+            img = img.resize(
+                (self.image_width, self.image_height),
+                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            )            
+            self.image = TRANSFORM(img)
+            
         elif tag == "scene_occluded":
-            self.sceneoccluded_mask = 1.- TRANSFORM(
-                Image.open(self.sceneoccluded_path).split()[-1]
-            )
+            mask = Image.open(self.sceneoccluded_path).split()[-1]
+            mask = mask.resize(
+                (self.image_width, self.image_height),
+                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            )  
+            self.sceneoccluded_mask = 1. - TRANSFORM(mask)

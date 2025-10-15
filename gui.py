@@ -39,7 +39,8 @@ class GUI(GUIBase):
                  skip_coarse,
                  view_test,
                  bundle_adjust,
-                 use_gui:bool=False
+                 use_gui:bool=False,
+                 downsample:int=2
                  ):
 
         self.skip_coarse = None
@@ -76,11 +77,11 @@ class GUI(GUIBase):
         # Set the gaussian mdel and scene
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None:
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start, downsample=downsample)
         else:
             if skip_coarse:
                 gaussians.active_sh_degree = dataset.sh_degree
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, skip_coarse=self.skip_coarse)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, skip_coarse=self.skip_coarse, downsample=downsample)
         
         self.total_frames = scene.maxframes
         # Initialize DPG      
@@ -212,23 +213,20 @@ class GUI(GUIBase):
                     c' = l.c + (1-l).c_mipmap
         """
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
-        
-        abc = self.scene.ibl.abc.cuda()
-                
-        id1 = int(viewpoint_cams.time*100)
+
+        # Sample the background image
+        id1 = int(viewpoint_cams.time*self.scene.maxframes)
         texture = self.scene.ibl[id1].cuda()
         
         rgb, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
-            abc,
             texture,
-            self.optix_runner
         )
         
         self.gaussians.pre_backward(self.iteration, info)
         
-        gt_img = viewpoint_cams.image.cuda() * (viewpoint_cams.sceneoccluded_mask.cuda())
+        gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
 
         loss = l1_loss(rgb, gt_img)
 
@@ -241,7 +239,7 @@ class GUI(GUIBase):
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
+                    dpg.set_value("_log_opacs", f"Loss: {loss.item()}")
                     # dpg.set_value("_log_depth", f"Depth Loss: {dL1.item()}")
                     dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
 
@@ -353,6 +351,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", type=int, default=4000)
+    parser.add_argument("--downsample", type=int, default=2)
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[8000, 15999, 20000, 30_000, 45000, 60000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)
@@ -398,29 +397,9 @@ if __name__ == "__main__":
         view_test=args.view_test,
         bundle_adjust=args.bundle_adjust,
 
-        use_gui=True
+        use_gui=True,
+        downsample=args.downsample
     )
     gui.render()
     del gui
     torch.cuda.empty_cache()
-    # TV Reg
-    # hyp.plane_tv_weight = 0.
-    # for value in [0.001,0.00075,0.00025,0.0001,]:
-    #     name = f'{initial_name}_TV{value}'
-    #     hyp.plane_tv_weight = value
-        
-    #     # Start GUI server, configure and run training
-    #     gui = GUI(
-    #         args=args, 
-    #         hyperparams=hyp, 
-    #         dataset=lp.extract(args), 
-    #         opt=op.extract(args), 
-    #         pipe=pp.extract(args),
-    #         testing_iterations=args.test_iterations, 
-    #         saving_iterations=args.save_iterations,
-    #         ckpt_start=args.start_checkpoint, 
-    #         debug_from=args.debug_from, 
-    #         expname=name,
-    #         skip_coarse=args.skip_coarse,
-    #         view_test=args.view_test
-    #     )

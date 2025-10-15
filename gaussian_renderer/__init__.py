@@ -54,6 +54,22 @@ def process_overfit_Gaussians(pc, time):
     
     return means3D, rotations, opacity, colors, scales, invariance
  
+ 
+def process_Gaussians_triplane(pc):
+    means3D = pc.get_xyz
+    colors = pc.get_features
+    opacity = pc.get_opacity
+
+    scales = pc.get_scaling
+    rotations = pc.splats["quats"]
+    
+    samples, sample_scale, invariance = pc._deformation(
+        point=means3D,
+    )
+    
+    rotations = pc.rotation_activation(rotations)
+    
+    return means3D, rotations, opacity, colors, scales, samples, sample_scale, invariance
 
 def process_Gaussians_extended(pc):
     means3D = pc.get_xyz
@@ -76,10 +92,6 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         gmode = 'RGB+D'
     elif mode == "invariance":
         colors = invariance.unsqueeze(0)
-        opacity = opacity.detach()
-        means3D = means3D.detach()
-        rotation = rotation.detach()
-        scales = scales.detach()
         gmode = 'RGB'
         sh_deg=None
     else:
@@ -293,59 +305,64 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
     time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
     
     if view_args["finecoarse_flag"]:
-        means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc)
+        if view_args['vis_mode'] != 'invariance':
+            means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc)
+        else:
+            means3D, rotation, opacity, colors, scales, samples, sample_scales, invariance = process_Gaussians_triplane(pc)
+
+        if view_args["stage"] == "ba":
+            scales *= 0.005
+        
+        # Set arguments depending on type of viewing
+        if view_args['vis_mode'] in 'render':
+            mode = "RGB"
+        elif view_args['vis_mode'] == 'alpha':
+            mode = "RGB"
+        elif view_args['vis_mode'] == 'normals':
+            mode = "normals"
+        elif view_args['vis_mode'] == '2D':
+            mode = "2D"
+        elif view_args['vis_mode'] == 'D':
+            mode = "D"
+        elif view_args['vis_mode'] == 'ED':
+            mode = "ED"
+        elif view_args['vis_mode'] == 'invariance':
+            mode = "invariance"
+        
+        # Render
+        render, alpha, _ = rendering_pass(
+            means3D, rotation, scales, opacity, colors, invariance,
+            viewpoint_camera, 
+            pc.active_sh_degree,
+            mode=mode
+        )
+        
+        if view_args['vis_mode'] == 'normals' or view_args['vis_mode'] == '2D':
+            view_args['vis_mode'] = 'render'
+        
+        # Process image
+        if view_args['vis_mode'] in 'render':
+            render = render.squeeze(0).permute(2,0,1)
+            
+            ibl = render_IBL_source(viewpoint_camera, abc, texture)
+            alpha = alpha.squeeze(-1)
+            render = render * (alpha) + (1-alpha) * ibl
+            
+        elif view_args['vis_mode'] == 'alpha':
+            render = alpha
+            render = (render - render.min())/ (render.max() - render.min())
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+        elif view_args['vis_mode'] == 'D':
+            render = (render - render.min())/ (render.max() - render.min())
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+            
+        elif view_args['vis_mode'] == 'ED':
+            render = (render - render.min())/ (render.max() - render.min())
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+        
+        
     else:
-        means3D, rotation, opacity, colors, scales, invariance = process_overfit_Gaussians(pc, time)
-    if view_args["stage"] == "ba":
-        scales *= 0.005
-    
-    
-    # Set arguments depending on type of viewing
-    if view_args['vis_mode'] in 'render':
-        mode = "RGB"
-    elif view_args['vis_mode'] == 'alpha':
-        mode = "RGB"
-    elif view_args['vis_mode'] == 'normals':
-        mode = "normals"
-    elif view_args['vis_mode'] == '2D':
-        mode = "2D"
-    elif view_args['vis_mode'] == 'D':
-        mode = "D"
-    elif view_args['vis_mode'] == 'ED':
-        mode = "ED"
-    elif view_args['vis_mode'] == 'invariance':
-        mode = "invariance"
-    
-    # Render
-    render, alpha, _ = rendering_pass(
-        means3D, rotation, scales, opacity, colors, invariance,
-        viewpoint_camera, 
-        pc.active_sh_degree,
-        mode=mode
-    )
-    
-    if view_args['vis_mode'] == 'normals' or view_args['vis_mode'] == '2D':
-        view_args['vis_mode'] = 'render'
-    
-    # Process image
-    if view_args['vis_mode'] in 'render':
-        render = render.squeeze(0).permute(2,0,1)
-        
-        ibl = render_IBL_source(viewpoint_camera, abc, texture)
-        alpha = alpha.squeeze(-1)
-        render = render * (alpha) + (1-alpha) * ibl
-        
-    elif view_args['vis_mode'] == 'alpha':
-        render = alpha
-        render = (render - render.min())/ (render.max() - render.min())
-        render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
-    elif view_args['vis_mode'] == 'D':
-        render = (render - render.min())/ (render.max() - render.min())
-        render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
-        
-    elif view_args['vis_mode'] == 'ED':
-        render = (render - render.min())/ (render.max() - render.min())
-        render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+        render, _ = render_extended(viewpoint_camera, pc, texture)
     
     return {
         "render": render,
@@ -423,65 +440,111 @@ def render_coarse(viewpoint_camera, pc):
     normal_err = (1 - (meta[0] * meta[1]).sum(dim=0))[None].mean()
     return rgb, meta[-1], normal_err
 
-def render_extended(viewpoint_camera, pc, abc, texture, optix_runner):
-    """Main Rendering function
-    
-    Algorithm:
-        Rendering Equation is:  l.c + (1-l).(a.cr + (1-a).(cq)) (simplified from the one I have in my notebooks so that we take small steps)
-        where...
-            (1) l is the intensity of the base colo (we can explicitly regularize this based on frame-frame rgb differences, whereby small l should map small/no difference in color
-            after relighting)
-            (2) c is the base color of the Gaussian i.e. can be G-Rendered
-            (3) a is the intensity of reflection
-            (4) cr and cq are the colors sampled from the reflection and transmission function, i.e. R-Rendered
-        Note that:
-            - l should not be view dependant, I think
-            - c can be rendered with the normal Gaussian Splatting function
-            - a is view dependant so should be rendered with G-Render, but with a single color channel (where we input alpha)
-            - l, a, c, should all be rendered with opacity = 1, this essentially forces l to model the intensity of the diffuse color (for now)
-            later I intend to turn cq into (opacity).c + (1-opacity).cq, such that "internal reflection" is accounted for, so that l.c is does not explicitly
-            represent the base color but the independance of the base color in the relighting set up - for now lets take small steps
-            
+def render_extended(viewpoint_camera, pc, texture):
+    """Fine/Deformation function
+
+    Notes:
+        Trains/Renders the deformed gaussians
             
     """
-    # time = torch.tensor(viewpoint_camera.time).to(pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1).detach()
-    # time = time*0. +viewpoint_camera.time
+    # Sample triplanes and return Gaussian params + a,b,lambda
+    means3D, rotation, opacity, colors, scales, samples, sample_scales, invariance = process_Gaussians_triplane(pc)
+        
+    colors_ibl = sample_mipmap(texture, samples, sample_scales)
+        
+    colors_canon, _, meta = rendering_pass(
+        means3D, 
+        rotation, 
+        scales, 
+        opacity, 
+        colors, 
+        None, 
+        viewpoint_camera, 
+        pc.active_sh_degree,
+        mode="RGB"
+    )
     
-    means3D, rotation, opacity, colors, scales, invariance, reflection, refraction = process_Gaussians_extended(pc)
+    colors_deform, _, _ = rendering_pass(
+        means3D.detach(), 
+        rotation.detach(), 
+        scales.detach(), 
+        opacity.detach(), 
+        colors_ibl.unsqueeze(0), 
+        None, 
+        viewpoint_camera, 
+        None,
+        mode="RGB"
+    )
     
-    # 1. G-Render c and l seperately
-    #   c
-    base_color, _, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
-    #   l
-    base_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, invariance, viewpoint_camera, pc.active_sh_degree)
-    
-    #   a
-    reflection_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, reflection, viewpoint_camera, pc.active_sh_degree)
-    
-    refraction_intensity, _ = rendering_base_intensity(means3D, rotation, scales, opacity, refraction, viewpoint_camera, pc.active_sh_degree)
+    invariance, _, _ = rendering_pass(
+        means3D.detach(), 
+        rotation.detach(), 
+        scales.detach(), 
+        opacity.detach(), # Force a hard surface (opacity.detach()*0.+1.)
+        None, 
+        invariance, 
+        viewpoint_camera, 
+        None,
+        mode="invariance"
+    )
+    rgb = invariance*colors_canon + (1.-invariance)*colors_deform
 
-    # We now need to process the reflection and transmission (mainly different in how d_i is calculated)
-    # 1. Reflection di' = di - 2 (di - n)n
-    xi, d, norms = render_multi_feature(means3D, rotation, scales, opacity, viewpoint_camera, pc.active_sh_degree)
-    di = d - 2.*(d-norms)*norms
-    
-    # 1. Refraction dr' = eta*di + (eta cosi - cosr)n, where eta = 1/n_material and cosi = -n.di and cosr = sqrt(1-eta^2 (1-cos^2i))
-    n_mat = 1
-    eta = 1/n_mat
-    cosi = -(norms*d).sum(dim=-1, keepdim=True)
-    dr = eta * d + (eta * cosi - torch.sqrt(torch.clamp( (1 - eta**2 * (1 - cosi**2)), min=1e-8))) * norms
-    dr = dr / (dr.norm(dim=-1, keepdim=True) + 1e-8)
-
-    # R-Render Pass
-    reflection_color = r_render(xi, di, norms, abc, texture, optix_runner, means3D, pc, colors,opacity, update_verts=True)
-    
-    transmission_color = r_render(xi, dr, norms, abc, texture, optix_runner, means3D, pc, colors, opacity)
-    
-    # transmission_color =  r_render(xi, di, norms, abc, texture, optix_runner, means3D, rotation, opacity, colors, scales)
-    
-    # Rendering function
-    rgb = (base_color*base_intensity) + (1.-base_intensity)*((reflection_intensity*reflection_color) + (1.-reflection_intensity)*(base_color*refraction_intensity + (1.-refraction_intensity)*transmission_color))
-    # Set up rasterization configuration
     rgb = rgb.squeeze(0).permute(2,0,1)
     
     return rgb, meta[-1]
+
+import torch.nn.functional as F
+def generate_mipmaps(I, num_levels=3):
+    I = I.unsqueeze(0)
+    maps = [I]
+    _, C,H,W = I.shape
+    
+    for _ in range(1, num_levels):
+        I = F.interpolate(
+            I, scale_factor=0.5,
+            mode='bilinear', align_corners=False,
+            recompute_scale_factor=True
+        )
+        maps.append(I)
+        
+    return maps
+
+def sample_mipmap(I, uv, s, num_levels=3):
+    """
+    args:
+        uv, Tensor, N,2
+        s, Tensor, N,1
+        I, Tensor, 3, H, W
+    """
+    N = s.size(0)
+    # 1. Generate mipmaps
+    maps = generate_mipmaps(I, num_levels=num_levels) # shaped list: 1,3,h,w where h,w, are the downsampled height and width per level
+    
+    # Normalize us -1, 1 (from 0, 1)
+    uv = 2.*uv -1.
+    uv = uv.unsqueeze(0).unsqueeze(0) # for grid_sample input we need, N,Hout,Wout,2, where N =1, and W=number of points
+    
+    # Scaling mip-maps
+    L = s*(num_levels-1.)
+    lower = torch.floor(L).long().clamp(max=num_levels-1)
+    upper = torch.clamp(lower + 1, max=num_levels-1)
+    s_interp = (L - lower.float())
+    
+    # Initialize mipmap samples
+    mip_samples = torch.empty((N, num_levels, 3), device=s.device)    
+    # For each map sample using u,v and store the values in samples
+    for idx, map in enumerate(maps):
+        # map is (1, 3, h, w)
+        
+        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
+    
+    gather_idx_low  = lower.view(N, 1, 1).expand(-1, 1, 3)
+    gather_idx_high = upper.view(N, 1, 1).expand(-1, 1, 3)
+
+    colors_low  = torch.gather(mip_samples, 1, gather_idx_low).squeeze(1)   # [N,3]
+    colors_high = torch.gather(mip_samples, 1, gather_idx_high).squeeze(1) 
+
+    colors = (1. - s_interp) * colors_low + s_interp * colors_high
+    
+    return colors
+    
