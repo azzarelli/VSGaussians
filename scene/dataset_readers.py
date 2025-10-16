@@ -22,8 +22,10 @@ class CameraInfo(NamedTuple):
     cy: np.array
 
     image_path: str
+    canon_path:str
     so_path: str
     b_path:str
+    diff_path:str
 
     uid: int    
     width: int
@@ -34,7 +36,6 @@ class CameraInfo(NamedTuple):
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: list
-    canonical_cameras: list
     test_cameras:list
     ba_cameras:list
     video_cameras: list
@@ -339,6 +340,7 @@ OPENGL = np.array([[1, 0, 0, 0],
 
 def readStudioCams(path, cams2world, focal, H, W, xyz, N, downsample=2):    
     path2imgs = os.path.join(path, 'images')
+    path2diff = os.path.join(path, 'differences')
     cams = sorted(os.listdir(path2imgs))
 
     # upsample intrinsics to match the original image
@@ -368,8 +370,10 @@ def readStudioCams(path, cams2world, focal, H, W, xyz, N, downsample=2):
         for ids, im_name in enumerate(sorted(os.listdir(os.path.join(path2imgs, cams[idx])))):
             image_path = os.path.join(path2imgs, cams[idx], im_name)
             so_path = os.path.join(path, "meta", "masks", f"{cams[idx]}.png")
+            canon_path = os.path.join(path, "meta", "canonical_0", f"{cams[idx]}.jpg")
             b_path = os.path.join(path, "meta", "backgrounds", f"{im_name[:-4]}.png")
-
+            diff_path = os.path.join(path2diff, cams[idx], im_name.replace('.jpg', '.pt'))
+            
             w2c = np.linalg.inv(pose)
             R = pose[:3,:3] # rotation
             T = w2c[:3,3] 
@@ -389,7 +393,10 @@ def readStudioCams(path, cams2world, focal, H, W, xyz, N, downsample=2):
                     width=w, height=h,
                     
                     image_path=image_path, 
-                    so_path=so_path,b_path=b_path,
+                    so_path=so_path,
+                    b_path=b_path,
+                    diff_path=diff_path,
+                    canon_path=canon_path,
                     
                     uid=cnt,
                     time = float(ids%N)/N, feature=0.
@@ -423,6 +430,7 @@ def readCanonicalCams(path, cams2world, focal, H, W, downsample=2):
     for idx, pose in enumerate(cams2world_aligned):
         # Construct path to canonical image
         image_path = os.path.join(path2imgs, f"{cams[idx]}")
+        so_path = os.path.join(path, "meta", "masks", f"{cams[idx].replace('.jpg', '.png')}")
 
         # Define the camera calibration settings
         w2c = np.linalg.inv(pose)
@@ -443,7 +451,9 @@ def readCanonicalCams(path, cams2world, focal, H, W, downsample=2):
                 width=w, height=h,
                 
                 image_path=image_path, 
-                so_path=None,b_path=None,
+                so_path=so_path,
+                b_path=None,
+                diff_path=None,
                 
                 uid=idx,
                 time = 0., feature=0.
@@ -478,12 +488,10 @@ def readHomeStudioInfo(path, N=98, downsample=2):
     # Get training cameras
     train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N, downsample)
     
-    # Get canonical cameras
-    canonical_cams = readCanonicalCams(path, c2w, focal, H, W, downsample)
-
     # TODO: Define testing method
     # For now just use the first camera as test
-    test_cams = train_cams[:N]
+    test_cams = [cam for i, cam in enumerate(train_cams) if i%N in [0, 1, 2]]
+    train_cams = [cam for i, cam in enumerate(train_cams) if i%N not in [0, 1, 2]]
     
     # We also need to define a dataset for bundle adjusting the screen and cams
     BA_cams = [train_cams[i] for i in range(len(train_cams)) if i % N == 0]
@@ -498,7 +506,6 @@ def readHomeStudioInfo(path, N=98, downsample=2):
         test_cameras=test_cams,
         video_cameras=train_cams,
 
-        canonical_cameras=canonical_cams,
         ba_cameras=BA_cams,
         
         nerf_normalization=nerf_normalization,

@@ -53,8 +53,10 @@ class Deformation(nn.Module):
         samples = torch.sigmoid(self.sample_decoder(dyn_feature))
         invariance = torch.sigmoid(self.invariance_decoder(dyn_feature))
         scaling = torch.sigmoid(self.scaling_decoder(dyn_feature))
+        
+        params = torch.cat([samples, scaling], dim=-1)
 
-        return samples, scaling, invariance
+        return params, invariance
     
     def get_mlp_parameters(self):
         parameter_list = []

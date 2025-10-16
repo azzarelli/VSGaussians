@@ -46,9 +46,7 @@ class Scene:
         
         self.train_camera = FourDGSdataset(scene_info.train_cameras, "train") #scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
         self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
-        
-        self.canonical_camera = FourDGSdataset(scene_info.canonical_cameras*3, "canon") # tripple the array of cameras so dataset has to do less work reloading 
-        
+                
         self.ba_camera = FourDGSdataset(scene_info.ba_cameras, "bundle_adjust")
 
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)

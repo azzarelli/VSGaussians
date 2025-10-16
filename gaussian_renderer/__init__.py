@@ -23,12 +23,11 @@ def process_Gaussians(pc):
     scales = pc.get_scaling
     rotations = pc.splats["quats"]
     
-    invariance = pc.get_invariance_coefficient    
 
     rotations = pc.rotation_activation(rotations)
     
         
-    return means3D, rotations, opacity, colors, scales, invariance
+    return means3D, rotations, opacity, colors, scales
 
 def process_overfit_Gaussians(pc, time):
     means3D = pc.get_xyz
@@ -63,29 +62,14 @@ def process_Gaussians_triplane(pc):
     scales = pc.get_scaling
     rotations = pc.splats["quats"]
     
-    samples, sample_scale, invariance = pc._deformation(
+    params, invariance = pc._deformation(
         point=means3D,
     )
     
     rotations = pc.rotation_activation(rotations)
     
-    return means3D, rotations, opacity, colors, scales, samples, sample_scale, invariance
+    return means3D, rotations, opacity, colors, scales, params, invariance
 
-def process_Gaussians_extended(pc):
-    means3D = pc.get_xyz
-    colors = pc.get_features
-    opacity = pc.get_opacity
-
-    scales = pc.get_scaling
-    rotations = pc.splats["quats"]
-    
-    invariance = pc.get_invariance_coefficient    
-    reflections = pc.get_reflection_coefficient    
-    refraction = pc.get_refraction_coefficient    
-
-    rotations = pc.rotation_activation(rotations)
-        
-    return means3D, rotations, opacity, colors, scales, invariance, reflections, refraction
  
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
@@ -306,9 +290,10 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
     
     if view_args["finecoarse_flag"]:
         if view_args['vis_mode'] != 'invariance':
-            means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc)
+            means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
+            invariance = None
         else:
-            means3D, rotation, opacity, colors, scales, samples, sample_scales, invariance = process_Gaussians_triplane(pc)
+            means3D, rotation, opacity, colors, scales, params, invariance = process_Gaussians_triplane(pc)
 
         if view_args["stage"] == "ba":
             scales *= 0.005
@@ -360,10 +345,9 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             render = (render - render.min())/ (render.max() - render.min())
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
         
-        
     else:
         render, _ = render_extended(viewpoint_camera, pc, texture)
-    
+
     return {
         "render": render,
         "extras":extras # A dict containing mor point info
@@ -379,7 +363,7 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     Render the scene for viewing
     """
     time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
-    means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc)
+    means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
     
     x, d = viewpoint_camera.generate_rays(ctype="tris")
 
@@ -399,48 +383,8 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     return buffer_image
 
 
-def render_batch(viewpoint_camera, pc):
-    """Training renderer the scene
-    
-        single bactch size
-    """
-    time = torch.tensor(viewpoint_camera.time).to(pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1).detach()
-    time = time*0. +viewpoint_camera.time
-    
-    means3D, rotation, opacity, colors, scales, invariance = process_overfit_Gaussians(pc, time)
-    
-    # Set up rasterization configuration
-    #      return: colors, alphas, (normals, surf_normals, distort, median_depth, meta)
-    rgb, alpha, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
-    rgb = rgb.squeeze(0).permute(2,0,1)
-    
-    # Masked loss
-    mask = viewpoint_camera.sceneoccluded_mask.cuda()
-    alpha = alpha.squeeze(-1)
-    alpha_err = (mask - alpha).abs().mean()
-    
-    # Depth norm - Surface norm loss
-    normal_err = (1 - (meta[0] * meta[1]).sum(dim=0))[None].mean()
-    return rgb, meta[-1], normal_err, alpha_err
-
-
-
-def render_coarse(viewpoint_camera, pc):
-    """During the coarse stage we train the canonical gaussians on an un-lit scene
-    """
-    # Get gaussian parameters
-    means3D, rotation, opacity, colors, scales, invariance = process_Gaussians(pc)
-    
-    # Set up rasterization configuration
-    #      return: colors, alphas, (normals, surf_normals, distort, median_depth, meta)
-    rgb, alpha, meta = rendering_pass(means3D, rotation, scales, opacity, colors, invariance, viewpoint_camera, pc.active_sh_degree)
-    rgb = rgb.squeeze(0).permute(2,0,1)
-        
-    # Depth norm - Surface norm loss
-    normal_err = (1 - (meta[0] * meta[1]).sum(dim=0))[None].mean()
-    return rgb, meta[-1], normal_err
-
-def render_extended(viewpoint_camera, pc, texture):
+from utils.sh_utils import eval_sh
+def render_extended(viewpoint_camera, pc, texture, return_canon=False):
     """Fine/Deformation function
 
     Notes:
@@ -448,50 +392,47 @@ def render_extended(viewpoint_camera, pc, texture):
             
     """
     # Sample triplanes and return Gaussian params + a,b,lambda
-    means3D, rotation, opacity, colors, scales, samples, sample_scales, invariance = process_Gaussians_triplane(pc)
-        
-    colors_ibl = sample_mipmap(texture, samples, sample_scales)
-        
-    colors_canon, _, meta = rendering_pass(
-        means3D, 
-        rotation, 
-        scales, 
-        opacity, 
-        colors, 
-        None, 
-        viewpoint_camera, 
-        pc.active_sh_degree,
-        mode="RGB"
-    )
+    means3D, rotation, opacity, colors, scales, params, invariance = process_Gaussians_triplane(pc)
     
-    colors_deform, _, _ = rendering_pass(
+    # Precompute point colors
+    shs_view = colors.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+    dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(colors.shape[0], 1))
+    dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+    sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+    colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    
+    # Precompute point a,b,s texture indexing
+
+    colors_ibl = sample_mipmap(texture, params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=3)
+    colors_ = invariance*colors_precomp + (1.-invariance)*colors_ibl
+
+    
+    colors_deform, _, meta = rendering_pass(
         means3D.detach(), 
         rotation.detach(), 
         scales.detach(), 
         opacity.detach(), 
-        colors_ibl.unsqueeze(0), 
+        colors_.unsqueeze(0),
         None, 
         viewpoint_camera, 
         None,
         mode="RGB"
     )
-    
-    invariance, _, _ = rendering_pass(
-        means3D.detach(), 
-        rotation.detach(), 
-        scales.detach(), 
-        opacity.detach(), # Force a hard surface (opacity.detach()*0.+1.)
-        None, 
-        invariance, 
-        viewpoint_camera, 
-        None,
-        mode="invariance"
-    )
-    rgb = invariance*colors_canon + (1.-invariance)*colors_deform
 
-    rgb = rgb.squeeze(0).permute(2,0,1)
-    
-    return rgb, meta[-1]
+    if return_canon:
+        colors_canon, _, _ = rendering_pass(
+            means3D, 
+            rotation, 
+            scales, 
+            opacity, 
+            colors_precomp.unsqueeze(0), 
+            None, 
+            viewpoint_camera, 
+            None,
+            mode="RGB"
+        )
+        return colors_deform.squeeze(0).permute(2,0,1), colors_canon.squeeze(0).permute(2,0,1), meta[-1]
+    return colors_deform.squeeze(0).permute(2,0,1), meta[-1]
 
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):

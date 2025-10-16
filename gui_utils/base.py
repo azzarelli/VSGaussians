@@ -304,40 +304,45 @@ class GUIBase:
             
             if self.view_test == False:
                 # Start recording step duration
-                if self.stage == 'coarse':
-                    canon_cams = self.get_canonical_views
-                    viewpoint_cams = [None for c in canon_cams]
-                else:
-                    canon_cams = self.get_canonical_views
-                    viewpoint_cams = self.get_batch_views
+                viewpoint_cams = self.get_batch_views
 
-                for canon_cam, deform_can in zip(canon_cams, viewpoint_cams):
+                for deform_can in viewpoint_cams:
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     self.iter_start.record()
-                
-                    if self.stage == 'coarse' and self.iteration < 2:
-                        self.train_coarse_step(canon_cam)
-                    elif self.stage == 'fine' and self.iteration <= self.final_iter:
-                        self.train_coarse_step(canon_cam)
+
+                    if self.iteration <= self.final_iter:
                         self.train_step(deform_can)
                     else:
-                        print('Initializing fine training...')
-                        self.stage = 'fine'
-                        self.iteration = 0
-                        break
-
-                    self.iteration += 1
-
-                    # Stop on the final iteration
-                    if self.iteration > self.final_iter:
                         self.stage = 'done'
                         dpg.stop_dearpygui()
+                        
+                    self.iteration += 1
+                    
+                    # Stop on the final iteration
+                    
                     
                     # Load viewer every iteration
                     with torch.no_grad():
                         self.viewer_step()
                         dpg.render_dearpygui_frame()
+
+
+                    if self.iteration % 2000 == 0:
+                        PSNR = 0.
+                        test_size  = len(self.scene.test_camera)
+                        for i, test_cam in enumerate(self.scene.test_camera):
+                            psnr = self.test_step(test_cam)
+                            PSNR+= psnr
+                            dpg.set_value("_log_test_progress", f"Progress: {int(100*(i/test_size))}%")
+                            dpg.set_value("_log_psnr_test", f"PSNR: {PSNR.item()}")
+                            dpg.render_dearpygui_frame()    
+
+                        PSNR = PSNR / test_size
+                        dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
+                        dpg.set_value("_log_test_progress", f"Progress: 0%")
+                        dpg.render_dearpygui_frame()    
+
             else:
                 with torch.no_grad():
                     self.viewer_step()
@@ -530,11 +535,11 @@ class GUIBase:
                 if self.view_test is False:
                     dpg.add_text("Training info:")
                     dpg.add_text("no data", tag="_log_iter")
-                    dpg.add_text("no data", tag="_log_loss")
-                    dpg.add_text("no data", tag="_log_depth")
-                    dpg.add_text("no data", tag="_log_opacs")
-                    dpg.add_text("no data", tag="_log_dynscales")
-                    dpg.add_text("no data", tag="_log_knn")
+                    dpg.add_text("no data", tag="_log_relit")
+                    dpg.add_text("no data", tag="_log_canon")
+                    dpg.add_text("no data", tag="_log_deform")
+                    dpg.add_text("no data", tag="_log_plane")
+                    dpg.add_text("no data", tag="_log_fine2")
 
                     dpg.add_text("no data", tag="_log_points")
                 else:
@@ -542,6 +547,7 @@ class GUIBase:
 
 
             with dpg.collapsing_header(label="Testing info:", default_open=True):
+                dpg.add_text("no data", tag="_log_test_progress")
                 dpg.add_text("no data", tag="_log_psnr_test")
                 dpg.add_text("no data", tag="_log_ssim")
 

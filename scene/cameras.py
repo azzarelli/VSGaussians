@@ -19,8 +19,8 @@ from PIL import Image
 from torchvision import transforms as T
 
 TRANSFORM = T.ToTensor()
-
-
+import io
+import os
 
 def getProjectionMatrixFromIntrinsics(fx, fy, cx, cy, width, height, znear, zfar):
     P = torch.zeros(4, 4)
@@ -50,8 +50,10 @@ class Camera(nn.Module):
                  width=None, height=None,
 
                  image_path=None,
+                 canon_path=None,
                  sceneoccluded_path=None,
-
+                 diff_path=None,
+                
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  ):
         super(Camera, self).__init__()
@@ -87,10 +89,14 @@ class Camera(nn.Module):
 
         #
         self.image_path=image_path
+        self.canon_path=canon_path
         self.sceneoccluded_path=sceneoccluded_path
-
+        self.diff_path = diff_path
+        
         self.image = None
+        self.canon = None
         self.sceneoccluded_mask = None
+        self.diff_image = None
         
     @property
     def intrinsics(self): # Get the intrinsics matric
@@ -204,7 +210,13 @@ class Camera(nn.Module):
                 resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
             )            
             self.image = TRANSFORM(img)
-            
+        elif tag == "canon":
+            img = Image.open(self.image_path).convert("RGB")
+            img = img.resize(
+                (self.image_width, self.image_height),
+                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            )            
+            self.canon = TRANSFORM(img)
         elif tag == "scene_occluded":
             mask = Image.open(self.sceneoccluded_path).split()[-1]
             mask = mask.resize(
@@ -212,3 +224,20 @@ class Camera(nn.Module):
                 resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
             )  
             self.sceneoccluded_mask = 1. - TRANSFORM(mask)
+            
+        elif tag == "differences":
+            
+            diff_image = torch.load(self.diff_path, map_location="cpu").unsqueeze(0)
+
+            # resize (height=512, width=512)
+            resized = F.interpolate(diff_image, size=(self.image_height, self.image_width), mode='bilinear', align_corners=False)
+
+            # remove batch dimension again
+            self.diff_image = resized.squeeze(0)
+            # later, in main process:
+            # self.diff_image = self.diff_image.to("cuda")
+            # self.diff_image = torch.load(self.diff_path, map_location="cuda")
+            # print(self.diff_path)
+            # with open(self.diff_path, "rb") as f:
+            #     buffer = io.BytesIO(f.read())
+            # self.diff_image = torch.load(buffer, map_location="cuda")

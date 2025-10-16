@@ -14,8 +14,11 @@ class FourDGSdataset(Dataset):
         
         self.loading_flags = {
             "image":True,
-            "scene_occluded": False if dataset_type == 'canon' else True
-            
+            "canon":True if dataset_type == 'train' else False,
+
+            "scene_occluded":True, # if dataset_type != 'test' else True,
+            "differences":False, #True if dataset_type == 'train' else False,
+
         }
         
     def __getitem__(self, index):
@@ -31,12 +34,20 @@ class FourDGSdataset(Dataset):
 
             image_path=self.dataset[index].image_path,
             sceneoccluded_path=self.dataset[index].so_path,
+            diff_path=self.dataset[index].diff_path,
+            
             uid=self.dataset[index].uid,
             data_device=torch.device("cuda"), 
         )
         
         if self.loading_flags["image"]:
             cam.load_image_from_flags("image")
+            
+        if self.loading_flags["canon"]:
+            cam.load_image_from_flags("canon")
+        
+        if self.loading_flags["differences"]:
+            cam.load_image_from_flags("differences")
             
         if self.loading_flags["scene_occluded"]:
             cam.load_image_from_flags("scene_occluded")

@@ -15,8 +15,8 @@ from torch.utils.data import DataLoader
 from utils.timer import Timer
 
 from utils.loss_utils import l1_loss
-
-from gaussian_renderer import render_batch, render_coarse, render, render_extended
+from utils.image_utils import psnr
+from gaussian_renderer import render, render_extended
 
 from torch.cuda.amp import autocast, GradScaler
 
@@ -119,29 +119,12 @@ class GUI(GUIBase):
         if self.view_test == False:
             self.random_loader  = True
 
-            print('Loading canonical dataset..')
-            self.canonical_viewpoint_stack = self.scene.canonical_camera
-            self.canonical_loader = iter(DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list))
-            
             print('Loading dataset..')
-
             self.viewpoint_stack = self.scene.train_camera
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                 num_workers=16, collate_fn=list))
     
-    @property
-    def get_canonical_views(self): 
-        try:
-            viewpoint_cams = next(self.canonical_loader)
-        except StopIteration:
-            viewpoint_stack_loader = DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
-            self.canonical_loader = iter(viewpoint_stack_loader)
-            viewpoint_cams = next(self.canonical_loader)
-        return viewpoint_cams
-    
-    
+
     @property
     def get_batch_views(self): 
         try:
@@ -153,52 +136,8 @@ class GUI(GUIBase):
             viewpoint_cams = next(self.loader)
         return viewpoint_cams
 
-    def train_coarse_step(self, viewpoint_cams):
-        """Coarse/Canonical Training
-        
-        Notes:
-            Trains the canonical representation on un-lit image set. Hence every image from the re-lighting set will have color deformation:
-                c' = c + delta-c_i, where delta-c_i  is the per-background image change in color
-            The idea being, we overfit the canon on the unlit scene and explicitly learn delta-c_i as the change w.r.t known image canon
-            
-            Hence, in this function/step we only train the canon
-        """
-        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
-
-        rgb, info, normal_err = render_coarse(
-            viewpoint_cams, 
-            self.gaussians,
-        )
-        
-        self.gaussians.pre_backward(self.iteration, info)
-        
-        gt_img = viewpoint_cams.image.cuda()
-        
-        loss = l1_loss(rgb, gt_img) + self.opt.lambda_normal * normal_err
-        with torch.no_grad():
-            if self.gui:
-                    dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
-                    dpg.set_value("_log_depth", f"Norm Loss: {self.opt.lambda_normal * normal_err.item()}")
-                    # dpg.set_value("_log_opacs", f"Alpha/Mask Loss: {self.opt.lambda_alpha * alpha_err.item()}")
-                    # dpg.set_value("_log_dynscales", f"Inv Loss: {self.opt.lambda_inv * inv_err.item()}")
-                    dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
-
-            
-            # Error if loss becomes nan
-            if torch.isnan(loss).any():
-                    
-                print("loss is nan, end training, reexecv program now.")
-                os.execv(sys.executable, [sys.executable] + sys.argv)
-                
-        # Backpass
-        loss.backward()
-
-        self.gaussians.post_backward(self.iteration, info)
-
-    
     def train_step(self, viewpoint_cams):
-        """Dine/Deformation Training
+        """Training
         
         Notes:
             As we follow, c' = c + delta-c_i, and it is assumed c has been over-fit on the un-lit training set,
@@ -218,30 +157,41 @@ class GUI(GUIBase):
         id1 = int(viewpoint_cams.time*self.scene.maxframes)
         texture = self.scene.ibl[id1].cuda()
         
-        rgb, info = render_extended(
+        relit, canon, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             texture,
+            return_canon=True
+        )        
+        self.gaussians.pre_backward(self.iteration, info)
+
+        relit_gt = viewpoint_cams.image.cuda() 
+        mask = 1. # viewpoint_cams.sceneoccluded_mask.cuda()
+
+        loss = l1_loss(relit, relit_gt* mask)
+        
+        canon_gt = viewpoint_cams.canon.cuda() 
+        canon_loss = l1_loss(canon, canon_gt* mask)
+
+        loss += canon_loss
+    
+        planeloss = self.gaussians.compute_regulation(
+            self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
+            self.hyperparams.minview_weight
         )
         
-        self.gaussians.pre_backward(self.iteration, info)
-        
-        gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
-
-        loss = l1_loss(rgb, gt_img)
-
-        # planeloss = self.gaussians.compute_regulation(
-        #     self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
-        #     self.hyperparams.minview_weight
-        # )
+        loss += planeloss #+ 0.01* diff_loss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    dpg.set_value("_log_opacs", f"Loss: {loss.item()}")
-                    # dpg.set_value("_log_depth", f"Depth Loss: {dL1.item()}")
-                    dpg.set_value("_log_points", f"Number points: {self.gaussians.get_xyz.shape[0]} ")
+                    
+                    dpg.set_value("_log_relit", f"Relit Loss: {loss.item()}")
+                    dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
+                    # dpg.set_value("_log_deform", f"Deform Loss: {deform_loss.item()}")
+                    
+                    dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
 
             
             # Error if loss becomes nan
@@ -254,6 +204,27 @@ class GUI(GUIBase):
         loss.backward()
 
         self.gaussians.post_backward(self.iteration, info)
+
+    @torch.no_grad
+    def test_step(self, viewpoint_cams):
+        """Dine/Deformation Testing
+        """
+
+        # Sample the background image
+        id1 = int(viewpoint_cams.time*self.scene.maxframes)
+        texture = self.scene.ibl[id1].cuda()
+        
+        relit, _ = render_extended(
+            viewpoint_cams, 
+            self.gaussians,
+            texture,
+        )
+
+        mask = viewpoint_cams.sceneoccluded_mask.cuda()
+
+        gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
+        return psnr(relit, gt_img* mask)
+        
 
         
 
@@ -341,6 +312,8 @@ def setup_seed(seed):
 if __name__ == "__main__":
     # Set up command line argument parser
     torch.cuda.empty_cache()
+
+    
     parser = ArgumentParser(description="Training script parameters")
     setup_seed(6666)
     lp = ModelParams(parser)
