@@ -162,7 +162,8 @@ class GUI(GUIBase):
             self.gaussians,
             texture,
             return_canon=True
-        )        
+        )
+
         self.gaussians.pre_backward(self.iteration, info)
 
         relit_gt = viewpoint_cams.image.cuda() 

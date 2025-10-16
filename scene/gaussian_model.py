@@ -162,9 +162,9 @@ class GaussianModel:
         self.strategy = DefaultStrategy(
             verbose=True,
             prune_opa=0.001,
-            grow_grad2d=0.0002,
+            # grow_grad2d=0.0002,
             grow_scale3d=0.01,
-            grow_scale2d=0.05,
+            # grow_scale2d=0.15,
             
             prune_scale3d=0.1,
             # refine_scale2d_stop_iter=4000, # splatfacto behavior
@@ -174,10 +174,13 @@ class GaussianModel:
             refine_every=training_args.densification_interval,
             absgrad=False,
             revised_opacity=False,
-            key_for_gradient="gradient_2dgs",
+            key_for_gradient="means2d",
+            
         )
         self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
-        self.strategy_state = self.strategy.initialize_state()
+        self.strategy_state = self.strategy.initialize_state(
+                scene_scale=self.spatial_lr_scale
+        )
         
         
         ##### Set-up hex-plane optimizers #####
@@ -231,6 +234,7 @@ class GaussianModel:
             state=self.strategy_state,
             step=iteration,
             info=info,
+            
         )
         
     def post_backward(self, iteration, info):
@@ -240,7 +244,7 @@ class GaussianModel:
             state=self.strategy_state,
             step=iteration,
             info=info,
-            packed=False,
+            packed=True,
         )
         for optimizer in self.gsplat_optimizers.values():
             optimizer.step()

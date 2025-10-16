@@ -82,7 +82,7 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         gmode = mode
     
     # Typical RGB render of base color
-    colors, alphas, normals, surf_normals, distort, median_depth, meta = rasterization_2dgs(
+    colors, alphas, meta = rasterization(
     # colors, alphas, meta = rasterization(
         means3D, rotation, scales, opacity.squeeze(-1), colors,
         cam.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
@@ -93,80 +93,18 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         render_mode=gmode,
         # rasterize_mode='antialiased',
         # eps2d=0.1,
-        sh_degree=sh_deg #pc.active_sh_degree
+        sh_degree=sh_deg, #pc.active_sh_degree,
+        packed=True
     )
     
     colors = colors[..., :3]
     
-    if mode == 'normals':
-        colors = surf_normals
-    elif mode == '2D':
-        colors = median_depth
+    # if mode == 'normals':
+    #     colors = surf_normals
+    # elif mode == '2D':
+    #     colors = median_depth
         
-    return colors, alphas, (normals, surf_normals, distort, median_depth, meta)
-
-def rendering_base_intensity(means3D, rotation, scales,opacity, color, cam, sh_deg=3):
-    colors = color.unsqueeze(0)
-    opacity = opacity.clone().detach()*0. + 1.0
-    gmode = 'RGB'
-    sh_deg=None
-
-    # Typical RGB render of base color
-    colors, alphas, normals, surf_normals, distort, median_depth, meta = rasterization_2dgs(
-    # colors, alphas, meta = rasterization(
-        means3D, rotation, scales, opacity.squeeze(-1), colors,
-        cam.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
-        cam.intrinsics.unsqueeze(0).cuda(),
-        cam.image_width, 
-        cam.image_height,
-        
-        render_mode=gmode,
-        sh_degree=sh_deg
-    )
-        
-    return colors, alphas
-
-
-def render_multi_feature(means3D, rotation, scales, opacity, cam, sh_deg=3):
-    # Here we want to render the position
-    # min_x = means3D[:, 0].min()
-    # denom_x = means3D[:, 0].max() - min_x
-    # min_y = means3D[:, 1].min()
-    # denom_y = means3D[:, 1].max() - min_y
-    # min_z = means3D[:, 2].min()
-    # denom_z = means3D[:, 2].max() - min_z
-    
-    # # Scale
-    # norm_means = means3D.clone()
-    # norm_means[:, 0] = (means3D[:, 0] - min_x)/denom_x
-    # norm_means[:, 1] = (means3D[:, 1] - min_y)/denom_y
-    # norm_means[:, 2] = (means3D[:, 2] - min_z)/denom_z
-    
-    colors = means3D.unsqueeze(0)
-    opacity = opacity.clone().detach()*0. + 1.0
-    gmode = 'RGB'
-    sh_deg=None
-
-    # Typical RGB render of base color
-    xyzs, alphas, normals, surf_normals, distort, median_depth, meta = rasterization_2dgs(
-    # colors, alphas, meta = rasterization(
-        means3D, rotation, scales, opacity.squeeze(-1), colors,
-        cam.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
-        cam.intrinsics.unsqueeze(0).cuda(),
-        cam.image_width, 
-        cam.image_height,
-        
-        render_mode=gmode,
-        sh_degree=sh_deg
-    )
-    # Unscale
-    # xyzs[..., 0] = (xyzs[..., 0] * denom_x) + min_x
-    # xyzs[..., 1] = (xyzs[..., 1] * denom_y) + min_y
-    # xyzs[..., 2] = (xyzs[..., 2] * denom_z) + min_z
-
-    _, direction = cam.generate_rays(ctype="tris")
-    
-    return xyzs, direction, normals.squeeze(0)
+    return colors, alphas, meta #(normals, surf_normals, distort, median_depth, meta)
 
 
 def sample_IBL(origin, direction, abc, texture):
@@ -408,10 +346,10 @@ def render_extended(viewpoint_camera, pc, texture, return_canon=False):
 
     
     colors_deform, _, meta = rendering_pass(
-        means3D.detach(), 
-        rotation.detach(), 
-        scales.detach(), 
-        opacity.detach(), 
+        means3D, 
+        rotation, 
+        scales, 
+        opacity, 
         colors_.unsqueeze(0),
         None, 
         viewpoint_camera, 
@@ -420,7 +358,7 @@ def render_extended(viewpoint_camera, pc, texture, return_canon=False):
     )
 
     if return_canon:
-        colors_canon, _, _ = rendering_pass(
+        colors_canon, _, meta = rendering_pass(
             means3D, 
             rotation, 
             scales, 
@@ -431,8 +369,8 @@ def render_extended(viewpoint_camera, pc, texture, return_canon=False):
             None,
             mode="RGB"
         )
-        return colors_deform.squeeze(0).permute(2,0,1), colors_canon.squeeze(0).permute(2,0,1), meta[-1]
-    return colors_deform.squeeze(0).permute(2,0,1), meta[-1]
+        return colors_deform.squeeze(0).permute(2,0,1), colors_canon.squeeze(0).permute(2,0,1), meta
+    return colors_deform.squeeze(0).permute(2,0,1), meta
 
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):
