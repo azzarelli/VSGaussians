@@ -482,8 +482,8 @@ def readHomeStudioInfo(path, N=98, downsample=2):
     # Load initial point cloud and colors
     pcd_path = os.path.join(path, 'meta', 'pointcloud.npy')
     pcd = np.load(pcd_path, allow_pickle=True)
-    pts = pcd[::3, :3]
-    col = pcd[::3, 3:]
+    pts = pcd[::5, :3]
+    col = pcd[::5, 3:]
 
     # Get training cameras
     train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N, downsample)

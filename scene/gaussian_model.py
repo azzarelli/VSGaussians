@@ -436,17 +436,17 @@ class GaussianModel:
         wavelets = self._deformation.deformation_net.grid.waveplanes_list()
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         for index, grids in enumerate(self._deformation.deformation_net.grid.grids_()):
-            if index in [0,1,3]: # space only
+            if index in [0,1,2]: # space only
                 for grid in grids:
                     tvtotal += compute_plane_smoothness(grid)
-            elif index in [2, 4, 5]:
-                for grid in grids: # space time
-                    tstotal += compute_plane_smoothness(grid)
+            # elif index in [2, 4, 5]:
+            #     for grid in grids: # space time
+            #         tstotal += compute_plane_smoothness(grid)
                 
-                for grid in wavelets[index]:
-                    l1total += torch.abs(grid).mean()    
+            #     for grid in wavelets[index]:
+            #         l1total += torch.abs(grid).mean()    
         
-        return plane_tv_weight * tvtotal + time_smoothness_weight*tstotal + l1_time_planes_weight*l1total
+        return plane_tv_weight * tvtotal #+ time_smoothness_weight*tstotal + l1_time_planes_weight*l1total
 
 
 from scipy.spatial import KDTree

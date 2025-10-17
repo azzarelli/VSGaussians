@@ -227,7 +227,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
     time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
     
     if view_args["finecoarse_flag"]:
-        if view_args['vis_mode'] != 'invariance':
+        if view_args['vis_mode'] not in ['invariance', 'deform']:
             means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
             invariance = None
         else:
@@ -236,6 +236,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         if view_args["stage"] == "ba":
             scales *= 0.005
         
+        active_sh = pc.active_sh_degree
         # Set arguments depending on type of viewing
         if view_args['vis_mode'] in 'render':
             mode = "RGB"
@@ -251,12 +252,16 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             mode = "ED"
         elif view_args['vis_mode'] == 'invariance':
             mode = "invariance"
+        elif view_args['vis_mode'] == 'deform':
+            colors = sample_mipmap(texture, params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=3).unsqueeze(0)
+            mode = "RGB"
+            active_sh=None
         
         # Render
         render, alpha, _ = rendering_pass(
             means3D, rotation, scales, opacity, colors, invariance,
             viewpoint_camera, 
-            pc.active_sh_degree,
+            active_sh,
             mode=mode
         )
         
@@ -264,12 +269,12 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             view_args['vis_mode'] = 'render'
         
         # Process image
-        if view_args['vis_mode'] in 'render':
+        if view_args['vis_mode'] == 'render':
             render = render.squeeze(0).permute(2,0,1)
             
-            ibl = render_IBL_source(viewpoint_camera, abc, texture)
-            alpha = alpha.squeeze(-1)
-            render = render * (alpha) + (1-alpha) * ibl
+            # ibl = render_IBL_source(viewpoint_camera, abc, texture)
+            # alpha = alpha.squeeze(-1)
+            # render = render * (alpha) + (1-alpha) * ibl
             
         elif view_args['vis_mode'] == 'alpha':
             render = alpha
@@ -282,6 +287,11 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         elif view_args['vis_mode'] == 'ED':
             render = (render - render.min())/ (render.max() - render.min())
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+            
+        elif view_args['vis_mode'] == 'invariance':
+            render = render.squeeze(-1).repeat(3,1,1)
+        elif view_args['vis_mode'] in 'deform':
+            render = render.squeeze(0).permute(2,0,1)
         
     else:
         render, _ = render_extended(viewpoint_camera, pc, texture)

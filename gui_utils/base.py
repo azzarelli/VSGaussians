@@ -409,8 +409,8 @@ class GUIBase:
                 # if buffer_image.shape[0] == 1:
                 #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
                 #     buffer_image = buffer_image.repeat(3,1,1)
-                if self.vis_mode == 'invariance':
-                    buffer_image = buffer_image.squeeze(-1).repeat(3,1,1)
+
+
                 buffer_image = torch.nn.functional.interpolate(
                     buffer_image.unsqueeze(0),
                     size=(self.H,self.W),
@@ -616,6 +616,8 @@ class GUIBase:
                     self.vis_mode = 'alpha'
                 def callback_toggle_show_invariance(sender):
                     self.vis_mode = 'invariance'
+                def callback_toggle_show_deform(sender):
+                    self.vis_mode = 'deform'
                     
                 def callback_toggle_show_triangles(sender):
                     self.vis_mode = 'triangles'
@@ -624,9 +626,10 @@ class GUIBase:
                     dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_triangles)  
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
-                    dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
-                    dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
+                    # dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
+                    # dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
                     dpg.add_button(label="Invar", callback=callback_toggle_show_invariance)
+                    dpg.add_button(label="Deform", callback=callback_toggle_show_deform)
                 
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="D", callback=callback_toggle_show_depth)

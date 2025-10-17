@@ -211,7 +211,7 @@ class Camera(nn.Module):
             )            
             self.image = TRANSFORM(img)
         elif tag == "canon":
-            img = Image.open(self.image_path).convert("RGB")
+            img = Image.open(self.canon_path).convert("RGB")
             img = img.resize(
                 (self.image_width, self.image_height),
                 resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS

@@ -35,6 +35,7 @@ class FourDGSdataset(Dataset):
             image_path=self.dataset[index].image_path,
             sceneoccluded_path=self.dataset[index].so_path,
             diff_path=self.dataset[index].diff_path,
+            canon_path=self.dataset[index].canon_path,
             
             uid=self.dataset[index].uid,
             data_device=torch.device("cuda"), 

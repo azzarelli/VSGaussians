@@ -167,7 +167,7 @@ class GUI(GUIBase):
         self.gaussians.pre_backward(self.iteration, info)
 
         relit_gt = viewpoint_cams.image.cuda() 
-        mask = 1. # viewpoint_cams.sceneoccluded_mask.cuda()
+        mask = viewpoint_cams.sceneoccluded_mask.cuda()
 
         loss = l1_loss(relit, relit_gt* mask)
         
@@ -193,6 +193,7 @@ class GUI(GUIBase):
                     # dpg.set_value("_log_deform", f"Deform Loss: {deform_loss.item()}")
                     
                     dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
+                    dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
             # Error if loss becomes nan
