@@ -167,12 +167,10 @@ class GUI(GUIBase):
 
         self.gaussians.pre_backward(self.iteration, info)
 
-        render_gt = viewpoint_cams.image.cuda() 
+        render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
 
         loss = l1_loss(render, render_gt)
-
-                   
-        # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
+       
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
@@ -208,36 +206,43 @@ class GUI(GUIBase):
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
 
         # Sample the background image
-        id1 = int(viewpoint_cams.time*self.scene.maxframes)
-        texture = self.scene.ibl[id1].cuda()
+        textures = []
+        for cam in viewpoint_cams:
+            id1 = int(cam.time*self.scene.maxframes)
+            textures.append(self.scene.ibl[id1])
         
-        relit, info = render_extended(
+        render, canon, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
-            texture,
-            return_canon=False
+            textures,
+            return_canon=True
         )
 
         self.gaussians.pre_backward(self.iteration, info)
 
-        relit_gt = viewpoint_cams.image.cuda() 
-        mask = viewpoint_cams.sceneoccluded_mask.cuda()
-
-        loss = l1_loss(relit, relit_gt* mask)
+        render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
+        masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         
+        canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
+
+
+        # Loss Functions
+        deform_loss = l1_loss(render, render_gt* masked_gt)
+        canon_loss = l1_loss(canon, canons_gt* masked_gt)
         planeloss = self.gaussians.compute_regulation(
             self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
             self.hyperparams.minview_weight
         )
         
-        loss += planeloss #+ 0.01* diff_loss
+        loss = deform_loss + canon_loss + planeloss #+ 0.01* diff_loss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     
-                    dpg.set_value("_log_relit", f"Relit Loss: {loss.item()}")
+                    dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
+                    dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
                     
                     dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")

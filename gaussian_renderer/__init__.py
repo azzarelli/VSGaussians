@@ -81,14 +81,32 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
     else:
         gmode = mode
     
+    try:
+        intr = []
+        w2c = []
+        for c in cam:
+            intr.append(c.intrinsics.unsqueeze(0))
+            w2c.append(c.world_view_transform.transpose(0,1).unsqueeze(0))
+        intr = torch.cat(intr, dim=0)
+        w2c = torch.cat(w2c, dim=0)
+        width = c.image_width
+        height = c.image_height
+        if means3D.dim() == 3:
+            intr = intr.unsqueeze(1)
+            w2c = w2c.unsqueeze(1)
+    except:
+        intr = cam.intrinsics.unsqueeze(0)
+        w2c = cam.world_view_transform.transpose(0,1).unsqueeze(0)
+        width = cam.image_width
+        height = cam.image_height
     # Typical RGB render of base color
     colors, alphas, meta = rasterization(
     # colors, alphas, meta = rasterization(
         means3D, rotation, scales, opacity.squeeze(-1), colors,
-        cam.world_view_transform.transpose(0,1).unsqueeze(0).cuda(), 
-        cam.intrinsics.unsqueeze(0).cuda(),
-        cam.image_width, 
-        cam.image_height,
+        w2c.cuda(), 
+        intr.cuda(),
+        width, 
+        height,
         
         render_mode=gmode,
         # rasterize_mode='antialiased',
@@ -96,15 +114,8 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         sh_degree=sh_deg, #pc.active_sh_degree,
         packed=True
     )
-    
-    colors = colors[..., :3]
-    
-    # if mode == 'normals':
-    #     colors = surf_normals
-    # elif mode == '2D':
-    #     colors = median_depth
         
-    return colors, alphas, meta #(normals, surf_normals, distort, median_depth, meta)
+    return colors, alphas, meta
 
 
 def sample_IBL(origin, direction, abc, texture):
@@ -332,7 +343,7 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
 
 
 from utils.sh_utils import eval_sh
-def render_extended(viewpoint_camera, pc, texture, return_canon=False):
+def render_extended(viewpoint_camera, pc, textures, return_canon=False):
     """Fine/Deformation function
 
     Notes:
@@ -343,44 +354,57 @@ def render_extended(viewpoint_camera, pc, texture, return_canon=False):
     means3D, rotation, opacity, colors, scales, params, invariance = process_Gaussians_triplane(pc)
     
     # Precompute point colors
-    shs_view = colors.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-    dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(colors.shape[0], 1))
-    dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-    sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-    colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+
     
     # Precompute point a,b,s texture indexing
+    colors_final = []
+    for texture, cam in zip(textures, viewpoint_camera):
+        shs_view = colors.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+        dir_pp = (means3D - cam.camera_center.cuda().repeat(colors.shape[0], 1))
+        dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+        sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+        colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+        
+        colors_ibl = sample_mipmap(texture.cuda(), params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=2)
+        colors_final.append((invariance*colors_precomp + (1.-invariance)*colors_ibl).unsqueeze(0))
 
-    colors_ibl = sample_mipmap(texture, params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=3)
-    colors_ = invariance*colors_precomp + (1.-invariance)*colors_ibl
+    colors_final = torch.cat(colors_final, dim=0)
+    M = len(textures)
+    means3D_final = means3D.unsqueeze(0).repeat(M, 1, 1)
+    rotation_final = rotation.unsqueeze(0).repeat(M, 1, 1)
+    scales_final = scales.unsqueeze(0).repeat(M, 1, 1)
+    opacity_final = opacity.unsqueeze(0).repeat(M, 1, 1)
 
-    
     colors_deform, _, meta = rendering_pass(
-        means3D, 
-        rotation, 
-        scales, 
-        opacity, 
-        colors_.unsqueeze(0),
+        means3D_final,
+        rotation_final, 
+        scales_final, 
+        opacity_final, 
+        colors_final,
         None, 
         viewpoint_camera, 
         None,
         mode="RGB"
     )
 
+    colors_deform = colors_deform.squeeze(1).permute(0, 3, 1, 2)
+    
     if return_canon:
-        colors_canon, _, meta = rendering_pass(
+        colors_canon, _, _ = rendering_pass(
             means3D, 
             rotation, 
             scales, 
             opacity, 
-            colors_precomp.unsqueeze(0), 
+            colors, 
             None, 
             viewpoint_camera, 
-            None,
+            pc.active_sh_degree,
             mode="RGB"
         )
-        return colors_deform.squeeze(0).permute(2,0,1), colors_canon.squeeze(0).permute(2,0,1), meta
-    return colors_deform.squeeze(0).permute(2,0,1), meta
+        colors_canon = colors_deform.squeeze(0)
+
+        return colors_deform, colors_canon, meta
+    return colors_deform, meta
 
 
 def render_canonical(viewpoint_camera, pc):
@@ -400,8 +424,8 @@ def render_canonical(viewpoint_camera, pc):
         pc.active_sh_degree,
         mode="RGB"
     )
-    
-    return colors.squeeze(0).permute(2,0,1), meta
+
+    return colors.squeeze(0).permute(0, 3, 1, 2), meta
 
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):

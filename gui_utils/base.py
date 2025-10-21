@@ -299,28 +299,21 @@ class GUIBase:
     
     def render(self):
         tested = True
+
         while dpg.is_dearpygui_running():
-            self.stage = 'coarse'
             if self.view_test == False:
                 dpg.set_value("_log_stage", self.stage)
 
                 if self.stage == 'coarse' and self.iteration < 3000:
                     # Do canonical step
                     viewpoint_cams = self.get_canonical_batch_views #canonical_train_step
-                    for cam in viewpoint_cams:
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                        self.iter_start.record()
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    self.iter_start.record()
 
-                        self.canonical_train_step(cam)
-                        
-                        # Load viewer every iteration
-                        with torch.no_grad():
-                            self.viewer_step()
-                            dpg.render_dearpygui_frame()
+                    self.canonical_train_step(viewpoint_cams)
 
-                        self.iter_end.record()
-
+                    self.iter_end.record()
                 elif self.stage == 'coarse':
                     self.iteration = 0
                     self.stage = 'fine'
@@ -328,19 +321,13 @@ class GUIBase:
                     # Do relighting step
                     viewpoint_cams = self.get_batch_views
 
-                    for deform_can in viewpoint_cams:
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                        self.iter_start.record()
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    self.iter_start.record()
 
-                        self.train_step(deform_can)
-                        
-                        # Load viewer every iteration
-                        with torch.no_grad():
-                            self.viewer_step()
-                            dpg.render_dearpygui_frame()
-                        
-                        self.iter_end.record()
+                    self.train_step(viewpoint_cams)
+
+                    self.iter_end.record()
 
                     if self.iteration % 2000 == 0:
                         PSNR = 0.
@@ -356,23 +343,20 @@ class GUIBase:
                         dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
                         dpg.set_value("_log_test_progress", f"Progress: 0%")
                         dpg.render_dearpygui_frame()    
-                    
                 else:
                     self.stage = 'done'
                     dpg.stop_dearpygui()
                 
                 # Update iteration
                 self.iteration += 1
-                    
-            else:
-                with torch.no_grad():
-                    self.viewer_step()
-                    dpg.render_dearpygui_frame()    
+
+
+            with torch.no_grad():
+                self.viewer_step()
+                dpg.render_dearpygui_frame()    
                 
-            
             with torch.no_grad():
                 self.timer.pause() # log and save
-            
                 torch.cuda.synchronize()
                 if self.iteration % 1000 == 0:
                     self.track_cpu_gpu_usage(0.1)

@@ -34,8 +34,8 @@ class Scene:
                 self.loaded_iter = load_iteration
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
-        max_frames = 98
-        num_cams = 14
+        max_frames = 100
+        num_cams = 19
         scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path, max_frames, downsample=downsample)
         dataset_type="condense"
         

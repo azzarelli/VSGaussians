@@ -1,11 +1,4 @@
 ModelHiddenParams = dict(
-    scene_config = {
-     'grid_dimensions': 2,
-     'input_coordinate_dim': 4,
-     'output_coordinate_dim': 16,
-     'resolution': [512, 100],
-     'wavelevel':2
-    },
     target_config = {
      'grid_dimensions': 2,
      'input_coordinate_dim': 4,
@@ -27,8 +20,6 @@ OptimizationParams = dict(
     iterations=16000, # 7000 salmon with 4 batch, 8000 with flame steak
     batch_size=2, # Was 4
     
-    opacity_reset_interval = 120000,    
-    densification_interval = 100,
     
     lambda_dssim = 0.2,
     lambda_dist = 0.0,
@@ -38,6 +29,7 @@ OptimizationParams = dict(
     
     densify_from_iter = 100,
     densify_until_iter = 3000,
-    
+    opacity_reset_interval = 120000,    
+    densification_interval = 100,
     
 )

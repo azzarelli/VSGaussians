@@ -643,10 +643,6 @@ def downsample_pointcloud_voxel_target(pcd, target_points=100_000, max_iter=10, 
     pcd_o3d.normals = o3d.utility.Vector3dVector(pcd.normals)
 
     N = np.asarray(pcd.points).shape[0]
-    if N <= target_points:
-        if verbose:
-            print(f"Point cloud already has {N} points ≤ target {target_points}. Skipping downsample.")
-        return pcd
 
     # Initial voxel search range
     bbox = pcd_o3d.get_axis_aligned_bounding_box()
@@ -733,9 +729,8 @@ def readStudio4Info(path, N=98, downsample=2):
         pcd = None
     
     if pcd.points.shape[0] > 120000:
-        pcd = downsample_pointcloud_voxel_target(pcd, target_points=100_000)
+        pcd = downsample_pointcloud_voxel_target(pcd, target_points=200_000)
     
-    print(pcd.points.shape)
     
     scene_info = SceneInfo(
         point_cloud=pcd,

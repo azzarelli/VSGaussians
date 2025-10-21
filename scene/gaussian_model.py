@@ -161,16 +161,17 @@ class GaussianModel:
         from gsplat import DefaultStrategy
         self.strategy = DefaultStrategy(
             verbose=True,
-            prune_opa=0.001,
+            prune_opa=0.1,
             # grow_grad2d=0.0002,
             grow_scale3d=0.01,
-            # grow_scale2d=0.15,
+            grow_scale2d=0.1,
             
             prune_scale3d=0.1,
+            
             # refine_scale2d_stop_iter=4000, # splatfacto behavior
             refine_start_iter=training_args.densify_from_iter,
             refine_stop_iter=training_args.densify_until_iter,
-            reset_every=training_args.opacity_reset_interval,
+            reset_every=1000,#training_args.opacity_reset_interval,
             refine_every=training_args.densification_interval,
             absgrad=False,
             revised_opacity=False,
@@ -379,7 +380,6 @@ class GaussianModel:
         xyz_max = fused_point_cloud.max(0).values
         self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)
     
-        
         features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
         features[:, :3, 0 ] = fused_color
         features[:, 3:, 1:] = 0.0
@@ -392,16 +392,15 @@ class GaussianModel:
         rots[:, 0] = 1
 
         # Initialize opacities
-        opacities = 0.95 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
+        opacities = 0.99 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
         
         mean_foreground = fused_point_cloud.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(fused_point_cloud - mean_foreground, dim=1)
-        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()
+        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()/2.
         
         print(f"Target lr scale: {self.spatial_lr_scale}")
         self.active_sh_degree = 0
         
-        # initialize the splats
         params = {
             # 2DGS/3DGS Parameters
             ("means", nn.Parameter(fused_point_cloud.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
@@ -415,7 +414,7 @@ class GaussianModel:
         self.splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to("cuda")
 
         import math
-        batch_size = 1 #training_args.batch_size
+        batch_size = training_args.batch_size
         self.gsplat_optimizers = {
             name: torch.optim.Adam(
                 [{"params": self.splats[name], "lr": lr * math.sqrt(batch_size)}],
@@ -429,24 +428,14 @@ class GaussianModel:
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight,
                            minview_weight):
         tvtotal = 0
-        l1total = 0
-        tstotal = 0
-        col=0
-        
-        wavelets = self._deformation.deformation_net.grid.waveplanes_list()
+
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
         for index, grids in enumerate(self._deformation.deformation_net.grid.grids_()):
             if index in [0,1,2]: # space only
                 for grid in grids:
                     tvtotal += compute_plane_smoothness(grid)
-            # elif index in [2, 4, 5]:
-            #     for grid in grids: # space time
-            #         tstotal += compute_plane_smoothness(grid)
-                
-            #     for grid in wavelets[index]:
-            #         l1total += torch.abs(grid).mean()    
-        
-        return plane_tv_weight * tvtotal #+ time_smoothness_weight*tstotal + l1_time_planes_weight*l1total
+
+        return plane_tv_weight * tvtotal
 
 
 from scipy.spatial import KDTree
