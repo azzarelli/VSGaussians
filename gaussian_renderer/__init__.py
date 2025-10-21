@@ -305,8 +305,8 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             render = render.squeeze(0).permute(2,0,1)
         
     else:
-        render, _ = render_extended(viewpoint_camera, pc, texture)
-
+        render, _ = render_extended([viewpoint_camera], pc, [texture])
+        render = render.squeeze(0)
     return {
         "render": render,
         "extras":extras # A dict containing mor point info
@@ -401,8 +401,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
             pc.active_sh_degree,
             mode="RGB"
         )
-        colors_canon = colors_deform.squeeze(0)
-
+        colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
         return colors_deform, colors_canon, meta
     return colors_deform, meta
 

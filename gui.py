@@ -229,6 +229,7 @@ class GUI(GUIBase):
         # Loss Functions
         deform_loss = l1_loss(render, render_gt* masked_gt)
         canon_loss = l1_loss(canon, canons_gt* masked_gt)
+        
         planeloss = self.gaussians.compute_regulation(
             self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
             self.hyperparams.minview_weight
@@ -269,9 +270,9 @@ class GUI(GUIBase):
         texture = self.scene.ibl[id1].cuda()
         
         relit, _ = render_extended(
-            viewpoint_cams, 
+            [viewpoint_cams], 
             self.gaussians,
-            texture,
+            [texture],
         )
 
         mask = viewpoint_cams.sceneoccluded_mask.cuda()
@@ -279,9 +280,6 @@ class GUI(GUIBase):
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
         return psnr(relit, gt_img* mask)
         
-
-        
-
     def nvs(self):
 
         # Start recording step duration
