@@ -16,7 +16,7 @@ from utils.timer import Timer
 
 from utils.loss_utils import l1_loss
 from utils.image_utils import psnr
-from gaussian_renderer import render, render_extended
+from gaussian_renderer import render, render_extended,render_canonical
 
 from torch.cuda.amp import autocast, GradScaler
 
@@ -119,11 +119,26 @@ class GUI(GUIBase):
         if self.view_test == False:
             self.random_loader  = True
 
+            print('Loading canonical dataset..')
+            self.canonical_viewpoint_stack = self.scene.canonical_camera
+            self.canonical_loader = iter(DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                num_workers=16, collate_fn=list))
+            
             print('Loading dataset..')
             self.viewpoint_stack = self.scene.train_camera
             self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                 num_workers=16, collate_fn=list))
     
+    @property
+    def get_canonical_batch_views(self): 
+        try:
+            viewpoint_cams = next(self.canonical_loader)
+        except StopIteration:
+            viewpoint_stack_loader = DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                num_workers=16, collate_fn=list)
+            self.canonical_loader = iter(viewpoint_stack_loader)
+            viewpoint_cams = next(self.canonical_loader)
+        return viewpoint_cams
 
     @property
     def get_batch_views(self): 
@@ -135,6 +150,45 @@ class GUI(GUIBase):
             self.loader = iter(viewpoint_stack_loader)
             viewpoint_cams = next(self.loader)
         return viewpoint_cams
+
+    
+    def canonical_train_step(self, viewpoint_cams):
+        """Training Canonical Space (DenserGeometry Learning)
+        
+        Notes:
+
+        """
+        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
+        
+        render, info = render_canonical(
+            viewpoint_cams, 
+            self.gaussians,
+        )
+
+        self.gaussians.pre_backward(self.iteration, info)
+
+        render_gt = viewpoint_cams.image.cuda() 
+
+        loss = l1_loss(render, render_gt)
+
+                   
+        # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
+        with torch.no_grad():
+            if self.gui:
+                    dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
+                    dpg.set_value("_log_canon", f"Canon Loss: {loss.item()}")
+                    dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
+            
+            # Error if loss becomes nan
+            if torch.isnan(loss).any():
+                print("loss is nan, end training, reexecv program now.")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+                
+        # Backpass
+        loss.backward()
+
+        self.gaussians.post_backward(self.iteration, info)
+
 
     def train_step(self, viewpoint_cams):
         """Training
@@ -157,11 +211,11 @@ class GUI(GUIBase):
         id1 = int(viewpoint_cams.time*self.scene.maxframes)
         texture = self.scene.ibl[id1].cuda()
         
-        relit, canon, info = render_extended(
+        relit, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             texture,
-            return_canon=True
+            return_canon=False
         )
 
         self.gaussians.pre_backward(self.iteration, info)
@@ -171,11 +225,6 @@ class GUI(GUIBase):
 
         loss = l1_loss(relit, relit_gt* mask)
         
-        canon_gt = viewpoint_cams.canon.cuda() 
-        canon_loss = l1_loss(canon, canon_gt* mask)
-
-        loss += canon_loss
-    
         planeloss = self.gaussians.compute_regulation(
             self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
             self.hyperparams.minview_weight
@@ -189,8 +238,6 @@ class GUI(GUIBase):
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     
                     dpg.set_value("_log_relit", f"Relit Loss: {loss.item()}")
-                    dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
-                    # dpg.set_value("_log_deform", f"Deform Loss: {deform_loss.item()}")
                     
                     dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")

@@ -16,9 +16,8 @@ class FourDGSdataset(Dataset):
             "image":True,
             "canon":True if dataset_type == 'train' else False,
 
-            "scene_occluded":True, # if dataset_type != 'test' else True,
-            "differences":False, #True if dataset_type == 'train' else False,
-
+            "scene_occluded":True if dataset_type == 'train' else False,
+            "differences":False,
         }
         
     def __getitem__(self, index):

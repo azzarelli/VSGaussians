@@ -44,10 +44,10 @@ class Scene:
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
         
-        self.train_camera = FourDGSdataset(scene_info.train_cameras, "train") #scene_info.train_cameras #FourDGSdataset(scene_info.train_cameras, dataset_type)
+        self.train_camera = FourDGSdataset(scene_info.train_cameras, "train")
         self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
                 
-        self.ba_camera = FourDGSdataset(scene_info.ba_cameras, "bundle_adjust")
+        self.canonical_camera = FourDGSdataset(scene_info.ba_cameras, "canon")
 
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
         

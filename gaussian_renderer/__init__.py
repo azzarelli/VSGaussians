@@ -382,6 +382,27 @@ def render_extended(viewpoint_camera, pc, texture, return_canon=False):
         return colors_deform.squeeze(0).permute(2,0,1), colors_canon.squeeze(0).permute(2,0,1), meta
     return colors_deform.squeeze(0).permute(2,0,1), meta
 
+
+def render_canonical(viewpoint_camera, pc):
+    """Canonical rendering function
+
+    """
+    means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
+    
+    colors, _, meta = rendering_pass(
+        means3D, 
+        rotation, 
+        scales, 
+        opacity, 
+        colors,
+        None, 
+        viewpoint_camera, 
+        pc.active_sh_degree,
+        mode="RGB"
+    )
+    
+    return colors.squeeze(0).permute(2,0,1), meta
+
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):
     I = I.unsqueeze(0)

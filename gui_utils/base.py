@@ -50,8 +50,7 @@ class GUIBase:
         self.full_opacity = False
         
         self.N_pseudo = 3 
-        self.free_cams = self.scene.ba_camera + [self.scene.test_camera[0]] 
-        # self.free_cams = [self.scene.get_pseudo_view() for i in range(self.N_pseudo)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
+        self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
         
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
@@ -62,17 +61,17 @@ class GUIBase:
             dpg.create_context()
             self.register_dpg()
             
-        if bundle_adjust and view_test == False :
+        # if bundle_adjust and view_test == False:
             # self.run_bundle_adjustment()
-            self.init_optix()        
+            # self.init_optix()        
             # self.test_optix()
         
 
-    def init_optix(self):
-        print('Running Optix Viewer Test...')
-        from gaussian_renderer.ray_tracer import OptixTriangles
+    # def init_optix(self):
+    #     print('Running Optix Viewer Test...')
+    #     from gaussian_renderer.ray_tracer import OptixTriangles
 
-        self.optix_runner = OptixTriangles()
+    #     self.optix_runner = OptixTriangles()
         
 
     def run_bundle_adjustment(self):
@@ -301,32 +300,47 @@ class GUIBase:
     def render(self):
         tested = True
         while dpg.is_dearpygui_running():
-            
+            self.stage = 'coarse'
             if self.view_test == False:
-                # Start recording step duration
-                viewpoint_cams = self.get_batch_views
+                dpg.set_value("_log_stage", self.stage)
 
-                for deform_can in viewpoint_cams:
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    self.iter_start.record()
+                if self.stage == 'coarse' and self.iteration < 3000:
+                    # Do canonical step
+                    viewpoint_cams = self.get_canonical_batch_views #canonical_train_step
+                    for cam in viewpoint_cams:
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        self.iter_start.record()
 
-                    if self.iteration <= self.final_iter:
-                        self.train_step(deform_can)
-                    else:
-                        self.stage = 'done'
-                        dpg.stop_dearpygui()
+                        self.canonical_train_step(cam)
                         
-                    self.iteration += 1
-                    
-                    # Stop on the final iteration
-                    
-                    
-                    # Load viewer every iteration
-                    with torch.no_grad():
-                        self.viewer_step()
-                        dpg.render_dearpygui_frame()
+                        # Load viewer every iteration
+                        with torch.no_grad():
+                            self.viewer_step()
+                            dpg.render_dearpygui_frame()
 
+                        self.iter_end.record()
+
+                elif self.stage == 'coarse':
+                    self.iteration = 0
+                    self.stage = 'fine'
+                elif self.iteration <= self.final_iter:
+                    # Do relighting step
+                    viewpoint_cams = self.get_batch_views
+
+                    for deform_can in viewpoint_cams:
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        self.iter_start.record()
+
+                        self.train_step(deform_can)
+                        
+                        # Load viewer every iteration
+                        with torch.no_grad():
+                            self.viewer_step()
+                            dpg.render_dearpygui_frame()
+                        
+                        self.iter_end.record()
 
                     if self.iteration % 2000 == 0:
                         PSNR = 0.
@@ -342,13 +356,19 @@ class GUIBase:
                         dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
                         dpg.set_value("_log_test_progress", f"Progress: 0%")
                         dpg.render_dearpygui_frame()    
-
+                    
+                else:
+                    self.stage = 'done'
+                    dpg.stop_dearpygui()
+                
+                # Update iteration
+                self.iteration += 1
+                    
             else:
                 with torch.no_grad():
                     self.viewer_step()
                     dpg.render_dearpygui_frame()    
                 
-            self.iter_end.record()
             
             with torch.no_grad():
                 self.timer.pause() # log and save
@@ -369,9 +389,7 @@ class GUIBase:
     def viewer_step(self):
         t0 = time.time()
         if self.switch_off_viewer == False:
-            self.scene.ba_camera.loading_flags["image"] = True
-            self.scene.ba_camera.loading_flags["scene_occluded"] = True if self.show_mask == "occ" else False
-            
+
             cam = self.free_cams[self.current_cam_index]
             cam.time = self.time
             
@@ -527,7 +545,9 @@ class GUIBase:
             with dpg.group(horizontal=True):
                 dpg.add_text("Infer time: ")
                 dpg.add_text("no data", tag="_log_infer_time")
-
+            with dpg.group(horizontal=True):
+                dpg.add_text("Stage: ")
+                dpg.add_text("no data", tag="_log_stage")
             # ----------------
             #  Loss Functions
             # ----------------
@@ -652,7 +672,7 @@ class GUIBase:
             delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
             cam = self.free_cams[self.current_cam_index]
 
-            zoom_scale = 0.1  # Smaller = faster zoom
+            zoom_scale = 0.5  # Smaller = faster zoom
 
             # Scale FoV within limits
             cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
