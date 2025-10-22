@@ -16,9 +16,12 @@ ModelHiddenParams = dict(
 )
 
 OptimizationParams = dict(
+    batch_size=2, # Was 4
+
     dataloader=True,
     iterations=16000, # 7000 salmon with 4 batch, 8000 with flame steak
-    batch_size=2, # Was 4
+    coarse_iterations=1,
+    
     
     
     lambda_dssim = 0.2,
@@ -29,7 +32,7 @@ OptimizationParams = dict(
     
     densify_from_iter = 100,
     densify_until_iter = 3000,
-    opacity_reset_interval = 120000,    
+    opacity_reset_interval = 3000,    
     densification_interval = 100,
     
 )

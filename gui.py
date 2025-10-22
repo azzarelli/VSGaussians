@@ -98,12 +98,19 @@ class GUI(GUIBase):
         if ckpt_start: self.iteration = int(self.scene.loaded_iter) + 1
          
     def init_taining(self):
-        self.final_iter = self.opt.iterations
+        # Set start and end of training
+        if self.stage == 'coarse':
+            self.final_iter = 10
+        else:
+            self.final_iter = self.opt.iterations
+            
         first_iter = 1
 
         # Set up gaussian training
-        self.gaussians.training_setup(self.opt)
-        # Load from fine model if it exists
+        if self.stage == 'coarse':
+            self.gaussians.training_canonical_setup(self.opt)
+        else:
+            self.gaussians.training_setup(self.opt)
 
         if self.checkpoint:
             (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_{self.checkpoint}.pth')
@@ -115,30 +122,20 @@ class GUI(GUIBase):
         # Events for counting duration of step
         self.iter_start = torch.cuda.Event(enable_timing=True)
         self.iter_end = torch.cuda.Event(enable_timing=True)
-
+        
         if self.view_test == False:
             self.random_loader  = True
 
-            print('Loading canonical dataset..')
-            self.canonical_viewpoint_stack = self.scene.canonical_camera
-            self.canonical_loader = iter(DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list))
-            
-            print('Loading dataset..')
-            self.viewpoint_stack = self.scene.train_camera
-            self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list))
-    
-    @property
-    def get_canonical_batch_views(self): 
-        try:
-            viewpoint_cams = next(self.canonical_loader)
-        except StopIteration:
-            viewpoint_stack_loader = DataLoader(self.canonical_viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list)
-            self.canonical_loader = iter(viewpoint_stack_loader)
-            viewpoint_cams = next(self.canonical_loader)
-        return viewpoint_cams
+            if self.stage == 'coarse':
+                print('Loading canonical dataset..')
+                self.viewpoint_stack = self.scene.canonical_camera
+                self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                    num_workers=16, collate_fn=list))
+            else:
+                print('Loading dataset..')
+                self.viewpoint_stack = self.scene.train_camera
+                self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                    num_workers=16, collate_fn=list))
 
     @property
     def get_batch_views(self): 
@@ -154,11 +151,9 @@ class GUI(GUIBase):
     
     def canonical_train_step(self, viewpoint_cams):
         """Training Canonical Space (DenserGeometry Learning)
-        
-        Notes:
-
         """
-        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
+        
+        self.gaussians.pre_train_step(self.iteration, self.opt.iterations, 'coarse')
         
         render, info = render_canonical(
             viewpoint_cams, 
@@ -185,7 +180,7 @@ class GUI(GUIBase):
         # Backpass
         loss.backward()
 
-        self.gaussians.post_backward(self.iteration, info)
+        self.gaussians.post_backward(self.iteration, info, 'coarse')
 
 
     def train_step(self, viewpoint_cams):
@@ -203,7 +198,7 @@ class GUI(GUIBase):
                 4. Processing the new color as 
                     c' = l.c + (1-l).c_mipmap
         """
-        self.gaussians.pre_train_step(self.iteration, self.opt.iterations)
+        self.gaussians.pre_train_step(self.iteration, self.opt.iterations, 'fine')
 
         # Sample the background image
         textures = []
@@ -258,7 +253,7 @@ class GUI(GUIBase):
         # Backpass
         loss.backward()
 
-        self.gaussians.post_backward(self.iteration, info)
+        self.gaussians.post_backward(self.iteration, info, 'fine')
 
     @torch.no_grad
     def test_step(self, viewpoint_cams):
@@ -279,80 +274,7 @@ class GUI(GUIBase):
 
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
         return psnr(relit, gt_img* mask)
-        
-    def nvs(self):
 
-        # Start recording step duration
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        cameras = self.scene.video_cameras        
-        
-        for idx, cam in enumerate(cameras):
-            buffer_image = render(
-                    cam,
-                    self.gaussians, 
-                    view_args={
-                        "vis_mode":"render"
-                    }
-            )["render"]
-            
-            save_novel_views(buffer_image, 
-                idx, self.args.expname)
-            
-            buffer_image = torch.nn.functional.interpolate(
-                buffer_image.unsqueeze(0),
-                size=(self.H,self.W),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-
-            self.buffer_image = (
-                buffer_image.permute(1, 2, 0)
-                .contiguous()
-                .clamp(0, 1)
-                .contiguous()
-                .detach()
-                .cpu()
-                .numpy()
-            )
-
-            buffer_image = self.buffer_image
-
-            dpg.set_value(
-                "_texture", buffer_image
-            )  # buffer must be contiguous, else seg fault!
-            
-            # Add _log_view_camera
-            dpg.set_value("_log_view_camera", f"Rendering Nove Views")
-
-
-            dpg.render_dearpygui_frame()
-
-import cv2
-def save_novel_views(pred, idx, name):
-    pred = (pred.permute(1, 2, 0)
-        # .contiguous()
-        .clamp(0, 1)
-        .contiguous()
-        .detach()
-        .cpu()
-        .numpy()
-    )*255
-
-    pred = pred.astype(np.uint8)
-
-    # Convert RGB to BGR for OpenCV
-    pred_bgr = cv2.cvtColor(pred, cv2.COLOR_RGB2BGR)
-
-    if not os.path.exists(f'output/{name}/nvs/'):
-        os.mkdir(f'output/{name}/nvs/')
-        os.mkdir(f'output/{name}/nvs/full/')
-    elif not os.path.exists(f'output/{name}/nvs/full/'):
-        os.mkdir(f'output/{name}/nvs/full/')
-    cv2.imwrite(f'output/{name}/nvs/full/{idx}.png', pred_bgr)
-
-    return pred_bgr
 
 def setup_seed(seed):
      torch.manual_seed(seed)

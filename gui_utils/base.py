@@ -304,48 +304,48 @@ class GUIBase:
             if self.view_test == False:
                 dpg.set_value("_log_stage", self.stage)
 
-                if self.stage == 'coarse' and self.iteration < 1:
-                    # Do canonical step
-                    viewpoint_cams = self.get_canonical_batch_views #canonical_train_step
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    self.iter_start.record()
-
-                    self.canonical_train_step(viewpoint_cams)
-
-                    self.iter_end.record()
-                elif self.stage == 'coarse':
-                    self.iteration = 0
-                    self.stage = 'fine'
-                elif self.iteration <= self.final_iter:
-                    # Do relighting step
+                if self.iteration <= self.final_iter:
+                    # Get batch data
                     viewpoint_cams = self.get_batch_views
-
+                    
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     self.iter_start.record()
-
-                    self.train_step(viewpoint_cams)
+                    
+                    # Depending on stage process a training step
+                    if self.stage == 'coarse':
+                        self.canonical_train_step(viewpoint_cams)
+                    else:
+                        self.train_step(viewpoint_cams)
 
                     self.iter_end.record()
-
-                    if self.iteration % 2000 == 0:
-                        PSNR = 0.
-                        test_size  = len(self.scene.test_camera)
-                        for i, test_cam in enumerate(self.scene.test_camera):
-                            psnr = self.test_step(test_cam)
-                            PSNR+= psnr
-                            dpg.set_value("_log_test_progress", f"Progress: {int(100*(i/test_size))}%")
-                            dpg.set_value("_log_psnr_test", f"PSNR: {PSNR.item()}")
-                            dpg.render_dearpygui_frame()    
-
-                        PSNR = PSNR / test_size
-                        dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
-                        dpg.set_value("_log_test_progress", f"Progress: 0%")
+                
+                else: # Initialize fine from coarse stage
+                    if self.stage == 'coarse':
+                        self.stage = 'fine'
+                        self.init_taining()
+                    
+                    else: # Stop trainnig once fine training is done
+                        self.stage = 'done'
+                        dpg.stop_dearpygui()
+                
+                # Test Step
+                if self.iteration % 2000 == 0:
+                    PSNR = 0.
+                    test_size  = len(self.scene.test_camera)
+                    for i, test_cam in enumerate(self.scene.test_camera):
+                        psnr = self.test_step(test_cam)
+                        PSNR+= psnr
+                        dpg.set_value("_log_test_progress", f"Progress: {int(100*(i/test_size))}%")
+                        dpg.set_value("_log_psnr_test", f"PSNR: {PSNR.item()}")
                         dpg.render_dearpygui_frame()    
-                else:
-                    self.stage = 'done'
-                    dpg.stop_dearpygui()
+
+                    PSNR = PSNR / test_size
+                    dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
+                    dpg.set_value("_log_test_progress", f"Progress: 0%")
+                    dpg.render_dearpygui_frame()
+                    
+                                
                 
                 # Update iteration
                 self.iteration += 1
@@ -358,11 +358,11 @@ class GUIBase:
             with torch.no_grad():
                 self.timer.pause() # log and save
                 torch.cuda.synchronize()
-                if self.iteration % 1000 == 0:
+                if self.iteration % 1000 == 500: # make it 500 so that we dont run this while loading view-test
                     self.track_cpu_gpu_usage(0.1)
                     
                 # Save scene when at the saving iteration
-                if (self.iteration in self.saving_iterations) or (self.iteration == self.final_iter-1):
+                if self.stage == 'fine' and ((self.iteration in self.saving_iterations) or (self.iteration == self.final_iter-1)):
                     self.save_scene()
 
                 self.timer.start()

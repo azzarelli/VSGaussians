@@ -26,6 +26,8 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.deformation import deform_network
 from scene.regulation import compute_plane_smoothness
 
+from gsplat import DefaultStrategy
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -154,11 +156,39 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
+    def training_canonical_setup(self, training_args):        
+        ##### Set-up GSplat optimizers #####
+        self.percent_dense = training_args.percent_dense
+        
+        self.strategy = DefaultStrategy(
+            verbose=True,
+            prune_opa=0.005,
+            grow_grad2d=0.0001,
+            grow_scale3d=0.01,
+            grow_scale2d=0.1,
+            
+            prune_scale3d=0.2,
+            
+            # refine_scale2d_stop_iter=4000, # splatfacto behavior
+            refine_start_iter=training_args.densify_from_iter,
+            refine_stop_iter=training_args.densify_until_iter,
+            reset_every=training_args.opacity_reset_interval,
+            refine_every=training_args.densification_interval,
+            absgrad=False,
+            revised_opacity=False,
+            key_for_gradient="means2d",
+            
+        )
+        self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
+        self.strategy_state = self.strategy.initialize_state(
+                scene_scale=self.spatial_lr_scale
+        )
+        
+        
     def training_setup(self, training_args):        
         ##### Set-up GSplat optimizers #####
         self.percent_dense = training_args.percent_dense
         
-        from gsplat import DefaultStrategy
         self.strategy = DefaultStrategy(
             verbose=True,
             prune_opa=0.005,
@@ -209,23 +239,22 @@ class GaussianModel:
                                                     lr_delay_mult=training_args.deformation_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
 
-    def pre_train_step(self, iteration, max_iterations):
+    def pre_train_step(self, iteration, max_iterations, stage):
         """Run pre-training step functions"""
-        if iteration < max_iterations:
-            self.hex_optimizer.zero_grad(set_to_none=True)
-        
-        # For hex-plane parameters
-        for param_group in self.hex_optimizer.param_groups:
-            if  "grid" in param_group["name"]:
-                lr = self.grid_scheduler_args(iteration)
-                param_group['lr'] = lr
-                
-            elif param_group["name"] == "deformation":
-                lr = self.deformation_scheduler_args(iteration)
-                param_group['lr'] = lr
+        if stage == 'fine':
+            # For hex-plane parameters
+            for param_group in self.hex_optimizer.param_groups:
+                if  "grid" in param_group["name"]:
+                    lr = self.grid_scheduler_args(iteration)
+                    param_group['lr'] = lr
+                    
+                elif param_group["name"] == "deformation":
+                    lr = self.deformation_scheduler_args(iteration)
+                    param_group['lr'] = lr
 
         if iteration % 100 == 0:
             self.oneupSHdegree()
+            
         return None    
 
     def pre_backward(self, iteration, info):
@@ -238,7 +267,7 @@ class GaussianModel:
             
         )
         
-    def post_backward(self, iteration, info):
+    def post_backward(self, iteration, info, stage):
         self.strategy.step_post_backward(
             params=self.splats,
             optimizers=self.gsplat_optimizers,
@@ -250,9 +279,10 @@ class GaussianModel:
         for optimizer in self.gsplat_optimizers.values():
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-            
-        self.hex_optimizer.step()
-        self.hex_optimizer.zero_grad(set_to_none=True)
+        
+        if stage == 'fine':
+            self.hex_optimizer.step()
+            self.hex_optimizer.zero_grad(set_to_none=True)
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
