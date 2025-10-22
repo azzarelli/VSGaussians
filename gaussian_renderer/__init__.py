@@ -62,13 +62,13 @@ def process_Gaussians_triplane(pc):
     scales = pc.get_scaling
     rotations = pc.splats["quats"]
     
-    params, invariance = pc._deformation(
+    texsample, texscale, invariance = pc._deformation(
         point=means3D,
     )
     
     rotations = pc.rotation_activation(rotations)
     
-    return means3D, rotations, opacity, colors, scales, params, invariance
+    return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
 
  
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
@@ -242,7 +242,14 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
             invariance = None
         else:
-            means3D, rotation, opacity, colors, scales, params, invariance = process_Gaussians_triplane(pc)
+            means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_Gaussians_triplane(pc)
+            
+            shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
+            dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(texsample.shape[0], 1))
+            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+            texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
+            
 
         if view_args["stage"] == "ba":
             scales *= 0.005
@@ -264,7 +271,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         elif view_args['vis_mode'] == 'invariance':
             mode = "invariance"
         elif view_args['vis_mode'] == 'deform':
-            colors = sample_mipmap(texture, params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=3).unsqueeze(0)
+            colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
             mode = "RGB"
             active_sh=None
         
@@ -351,10 +358,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
             
     """
     # Sample triplanes and return Gaussian params + a,b,lambda
-    means3D, rotation, opacity, colors, scales, params, invariance = process_Gaussians_triplane(pc)
-    
-    # Precompute point colors
-
+    means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_Gaussians_triplane(pc)
     
     # Precompute point a,b,s texture indexing
     colors_final = []
@@ -364,8 +368,15 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+
+        shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
+        dir_pp = (means3D - cam.camera_center.cuda().repeat(texsample.shape[0], 1))
+        dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+        sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+        texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        colors_ibl = sample_mipmap(texture.cuda(), params[:, :-1], params[:, -1].unsqueeze(-1), num_levels=2)
+        
+        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=2)
         colors_final.append((invariance*colors_precomp + (1.-invariance)*colors_ibl).unsqueeze(0))
 
     colors_final = torch.cat(colors_final, dim=0)

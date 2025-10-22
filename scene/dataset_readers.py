@@ -581,7 +581,7 @@ def readStudio4Info(path, N=98, downsample=2):
         pcd = None
     
     if pcd.points.shape[0] > 120000:
-        pcd = downsample_pointcloud_voxel_target(pcd, target_points=200_000)
+        pcd = downsample_pointcloud_voxel_target(pcd, target_points=50_000)
     
     
     scene_info = SceneInfo(

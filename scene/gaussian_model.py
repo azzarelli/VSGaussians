@@ -161,17 +161,17 @@ class GaussianModel:
         from gsplat import DefaultStrategy
         self.strategy = DefaultStrategy(
             verbose=True,
-            prune_opa=0.1,
-            # grow_grad2d=0.0002,
+            prune_opa=0.005,
+            grow_grad2d=0.0001,
             grow_scale3d=0.01,
             grow_scale2d=0.1,
             
-            prune_scale3d=0.1,
+            prune_scale3d=0.2,
             
             # refine_scale2d_stop_iter=4000, # splatfacto behavior
             refine_start_iter=training_args.densify_from_iter,
             refine_stop_iter=training_args.densify_until_iter,
-            reset_every=1000,#training_args.opacity_reset_interval,
+            reset_every=3000,#training_args.opacity_reset_interval,
             refine_every=training_args.densification_interval,
             absgrad=False,
             revised_opacity=False,
@@ -224,7 +224,7 @@ class GaussianModel:
                 lr = self.deformation_scheduler_args(iteration)
                 param_group['lr'] = lr
 
-        if iteration % 500 == 0:
+        if iteration % 100 == 0:
             self.oneupSHdegree()
         return None    
 
@@ -372,7 +372,6 @@ class GaussianModel:
         }
     
     def create_from_pcd(self, pcd : BasicPointCloud, training_args):
-        
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         
@@ -396,7 +395,7 @@ class GaussianModel:
         
         mean_foreground = fused_point_cloud.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(fused_point_cloud - mean_foreground, dim=1)
-        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()/2.
+        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()
         
         print(f"Target lr scale: {self.spatial_lr_scale}")
         self.active_sh_degree = 0

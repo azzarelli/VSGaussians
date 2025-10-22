@@ -304,7 +304,7 @@ class GUIBase:
             if self.view_test == False:
                 dpg.set_value("_log_stage", self.stage)
 
-                if self.stage == 'coarse' and self.iteration < 3000:
+                if self.stage == 'coarse' and self.iteration < 1:
                     # Do canonical step
                     viewpoint_cams = self.get_canonical_batch_views #canonical_train_step
                     torch.cuda.empty_cache()
@@ -563,9 +563,14 @@ class GUIBase:
                     self.switch_off_viewer = ~self.switch_off_viewer
                 def callback_toggle_finecoarse(sender):
                     self.finecoarse_flag = False if self.finecoarse_flag else True
+                    
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Pause/Resume Viewer", callback=callback_toggle_show_rgb)                    
-                    dpg.add_button(label="View Canon/Relit", callback=callback_toggle_finecoarse)
+                    dpg.add_text("Pause/Play Viewer ")
+                    dpg.add_button(label="||>", callback=callback_toggle_show_rgb)  
+                
+                with dpg.group(horizontal=True):
+                    dpg.add_text("View Relighting Scene")
+                    dpg.add_button(label="--", callback=callback_toggle_finecoarse)
                      
                 def callback_toggle_reset_cam(sender):
                     self.current_cam_index = 0
@@ -578,33 +583,24 @@ class GUIBase:
                     dpg.add_text("no data", tag="_log_view_camera")
                     dpg.add_button(label="Next cam", callback=callback_toggle_next_cam)
 
-                def callback_toggle_sceneocc_mask(sender):
-                    self.show_mask = 'occ'
-                def callback_toggle_no_mask(sender):
-                    self.show_mask = 'none'
-                    
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="No Mask", callback=callback_toggle_no_mask)
-                    dpg.add_button(label="Occlu Mask", callback=callback_toggle_sceneocc_mask)
-                    
-                
-                def callback_toggle_show_target(sender):
-                    self.show_scene_target = 1
-                def callback_toggle_show_scene(sender):
-                    self.show_scene_target = -1 
-                def callback_toggle_show_full(sender):
-                    self.show_scene_target = 0 
-                    
                 def callback_toggle_reset_cam(sender):
                     for i in range(len(self.free_cams)):
                         self.free_cams[i] = copy.deepcopy(self.original_cams[i])
                     self.current_cam_index = 0
             
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Target", callback=callback_toggle_show_target)
-                    dpg.add_button(label="Scene", callback=callback_toggle_show_scene)
-                    dpg.add_button(label="Full", callback=callback_toggle_show_full)
-                    dpg.add_button(label="Rst Fov", callback=callback_toggle_reset_cam)
+                    dpg.add_button(label="Reset Fov", callback=callback_toggle_reset_cam)
+                    
+                def callback_toggle_sceneocc_mask(sender):
+                    self.show_mask = 'occ'
+                def callback_toggle_no_mask(sender):
+                    self.show_mask = 'none'
+                    
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Show/Unshow Masks")
+                    dpg.add_button(label="No Mask", callback=callback_toggle_no_mask)
+                    dpg.add_button(label="Occlu Mask", callback=callback_toggle_sceneocc_mask)
+                    
                 
                 def callback_toggle_show_rgb(sender):
                     self.vis_mode = 'render'
