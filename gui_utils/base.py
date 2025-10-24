@@ -312,15 +312,16 @@ class GUIBase:
                     
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-                    # self.iter_start.record()
+                    self.iter_start.record()
                     
-                    # # Depending on stage process a training step
-                    # if self.stage == 'coarse':
-                    #     self.canonical_train_step(viewpoint_cams)
-                    # else:
-                    #     self.train_step(viewpoint_cams)
+                    # Depending on stage process a training step
+                    if self.stage == 'coarse':
+                        self.iteration = self.final_iter
+                        self.canonical_train_step(viewpoint_cams)
+                    else:
+                        self.train_step(viewpoint_cams)
 
-                    # self.iter_end.record()
+                    self.iter_end.record()
                 
                 else: # Initialize fine from coarse stage
                     if self.stage == 'coarse':

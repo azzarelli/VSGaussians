@@ -240,10 +240,6 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
-
-        if view_args["stage"] == "ba":
-            scales *= 0.005
-        
         active_sh = pc.active_sh_degree
         # Set arguments depending on type of viewing
         if view_args['vis_mode'] in 'render':
@@ -294,7 +290,11 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] == 'invariance':
-            render = render.squeeze(-1).repeat(3,1,1)
+            try: 
+                render = render.squeeze(0).permute(2,0,1)
+            except:
+                render = render.squeeze(-1).repeat(3,1,1)
+            
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
         

@@ -451,6 +451,9 @@ class GaussianModel:
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         
+
+        means = torch.tensor(xyz, dtype=torch.float, device="cuda")
+        
         opac_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("opacity")]
 
         opacities = np.zeros((xyz.shape[0], len(opac_names)))
@@ -488,7 +491,6 @@ class GaussianModel:
         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
 
-        means = torch.tensor(xyz, dtype=torch.float, device="cuda")
         xyz_min = means.min(0).values
         xyz_max = means.max(0).values
         self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)

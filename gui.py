@@ -138,7 +138,7 @@ class GUI(GUIBase):
                                                     num_workers=16, collate_fn=list))
 
             self.filter_3D_stack = self.scene.mipsplatting_cameras
-            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+            # self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
 
     @property
     def get_batch_views(self): 
@@ -222,7 +222,6 @@ class GUI(GUIBase):
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         
         canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-
 
         # Loss Functions
         deform_loss = l1_loss(render, render_gt* masked_gt)

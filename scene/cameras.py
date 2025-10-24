@@ -54,8 +54,11 @@ class Camera(nn.Module):
                             [0, fy, cy],
                             [0,  0,  1]  ])
         dist = np.array([k1, k2, p1, p2])
-        self.K, roi = cv2.getOptimalNewCameraMatrix(K, dist, (width, height), 1)
+        self.K , _ = cv2.getOptimalNewCameraMatrix(K, dist, (width, height), 1)
         
+        self.dist = dist
+        self.K0 = K
+
         self.image_height = height
         self.image_width = width
         
@@ -79,6 +82,9 @@ class Camera(nn.Module):
     def intrinsics(self): # Get the intrinsics matric
         return torch.from_numpy(self.K).float()
 
+    @property
+    def camera_center(self):
+        return torch.from_numpy(self.T).float()
         
     @property
     def pose(self):# Get the c2w 
@@ -110,7 +116,8 @@ class Camera(nn.Module):
             mask = mask.resize(
                 (self.image_width, self.image_height),
                 resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
-            )  
+            )
+
             self.sceneoccluded_mask = 1. - TRANSFORM(mask)
             
         elif tag == "differences":

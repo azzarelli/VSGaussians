@@ -49,6 +49,7 @@ class SceneInfo(NamedTuple):
     background_pth_ids:list
     param_path:str
 
+
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
         cam_centers = np.hstack(cam_centers)
@@ -338,84 +339,48 @@ def readColmapInfo(path, N=98, downsample=2):
 def opengl_to_opencv(c2w: np.ndarray) -> np.ndarray:
     flip = np.diag([1.0, -1.0, -1.0, 1.0]).astype(c2w.dtype)
     return c2w @ flip
+
 def readCamerasFromTransforms(path, transformsfile):
     cam_infos = []
 
     tf_path = os.path.join(path, transformsfile)
-    with open(tf_path) as json_file:
+    with open(tf_path, "r") as json_file:
         contents = json.load(json_file)
 
-    # Global intrinsics fallbacks
-    g_fx = contents.get("fl_x", None)
-    g_fy = contents.get("fl_y", None)
-    g_cx = contents.get("cx", None)
-    g_cy = contents.get("cy", None)
-    g_w = contents.get("w", None)
-    g_h = contents.get("h", None)
-    g_k1 = contents.get("k1", None)
-    g_k2 = contents.get("k2", None)
-    g_p1 = contents.get("p1", None)
-    g_p2 = contents.get("p2", None)
+    # Global intrinsics
+    g_fx = contents.get("fl_x")
+    g_fy = contents.get("fl_y")
+    g_cx = contents.get("cx")
+    g_cy = contents.get("cy")
+    g_w  = contents.get("w")
+    g_h  = contents.get("h")
+    g_k1 = contents.get("k1")
+    g_k2 = contents.get("k2")
+    g_p1 = contents.get("p1")
+    g_p2 = contents.get("p2")
 
-    # Try to load Nerfstudio dataparser normalization (transform + scale)
-    Tns = None
-    s_ns = None
-    dp_candidates = [
-        os.path.join(path, "dataparser_transforms.json"),
-        os.path.join(path, "checkpoint", "dataparser_transforms.json"),
-        os.path.join(path, "nstudio", "checkpoint", "dataparser_transforms.json"),
-    ]
-    for dp_path in dp_candidates:
-        if os.path.exists(dp_path):
-            with open(dp_path) as f:
-                dp = json.load(f)
-            Tns = np.eye(4, dtype=np.float32)
-            tf = np.array(dp["transform"], dtype=np.float32)  # 3x4 [R|t]
-            Tns[:3, :3] = tf[:, :3]
-            Tns[:3, 3] = tf[:, 3]
-            s_ns = float(dp["scale"])
-            break
-
-    # Fallback: apply top-level scale/offset in transforms.json (if present)
-    if Tns is None:
-        top_scale = contents.get("scale", None)
-        top_offset = contents.get("offset", None)
-        if (top_scale is not None) or (top_offset is not None):
-            Tns = np.eye(4, dtype=np.float32)
-            if top_offset is not None:
-                Tns[:3, 3] = np.array(top_offset, dtype=np.float32)
-            s_ns = float(top_scale) if top_scale is not None else 1.0
-
-    frames = contents["frames"]
+    # Nerfstudio normalization (transform + scale)
+    frames = contents["frames"] 
     for idx, frame in enumerate(frames):
-        # Per-frame intrinsics override globals if present
         fx = frame.get("fl_x", g_fx)
         fy = frame.get("fl_y", g_fy)
         cx = frame.get("cx", g_cx)
         cy = frame.get("cy", g_cy)
-        w = frame.get("w", g_w)
-        h = frame.get("h", g_h)
-        
+        w  = frame.get("w", g_w)
+        h  = frame.get("h", g_h)
+
         k1 = frame.get("k1", g_k1)
         k2 = frame.get("k2", g_k2)
         p1 = frame.get("p1", g_p1)
         p2 = frame.get("p2", g_p2)
 
-
-
-        # Build c2w (OpenGL convention). Keep as-is; let renderer handle flips.
-        c2w = np.eye(4, dtype=np.float32)
-        c2w[:3, :4] = np.array(frame["transform_matrix"], dtype=np.float32)[:3, :4]
-
-        # Apply dataparser normalization if available
-        if Tns is not None:
-            c2w = Tns @ c2w
-            c2w[:3, 3] *= s_ns
-
+        # Load and convert transform
+        c2w = np.array(frame["transform_matrix"], dtype=np.float32)
+   
+        
         R = c2w[:3, :3]
         T = c2w[:3, 3]
 
-        # Resolve image path robustly
         image_path = os.path.normpath(os.path.join(path, frame["file_path"]))
 
         cam_infos.append(CameraInfo(
@@ -436,7 +401,6 @@ def readCamerasFromTransforms(path, transformsfile):
     return cam_infos
 
 
-
 def readCamerasFromCanon(path, canon_cams, M=19):
     
     background_path = os.path.join(path, 'meta', 'backgrounds')
@@ -447,7 +411,7 @@ def readCamerasFromCanon(path, canon_cams, M=19):
     # Get the colmap id for the first relit camera (i.e. the last 19 frames of the nerfstudio dataset)
     N = len(canon_cams) - M
     L = len(background_im_paths)
-    
+
     relit_cams = []
     for cam in canon_cams:
         if cam.uid > N:
@@ -521,7 +485,7 @@ def readNerfstudioInfo(path, N=98, downsample=2):
         nerf_normalization=nerf_normalization,
         background_pth_ids=background_paths,
 
-        param_path=os.path.join(path, 'splat','splat.ply')
+        param_path=os.path.join(path, 'splat','splat.ply'),
 
     )
     return scene_info

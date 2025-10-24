@@ -73,7 +73,7 @@ class Scene:
             if scene_info.param_path is not None:
                 self.gaussians.load_ply(
                     scene_info.param_path,
-                    opt
+                    opt,
                 )
             else:
                 self.gaussians.create_from_pcd(scene_info.param_path, opt)
