@@ -7,21 +7,14 @@ from gsplat.rendering import rasterization, rasterization_2dgs
 
 from gaussian_renderer.ray_tracer import RaycastSTE
 
-def render_IBL_source(cam, abc, texture, device="cuda"):
-    intr = cam.intrinsics
-    fx,fy,cx,cy = intr[0,0], intr[1,1], intr[0,2], intr[1,2]
-    origin, direction = cam.generate_rays(None, None, None, fx,fy,cx,cy)
-    
-    return cam.surface_sample(origin, direction, abc, texture.cuda())
-
 
 def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
     
-    opacity = pc.get_opacity_with_3D_filter
+    opacity = pc.get_opacity #pc.get_opacity_with_3D_filter
 
-    scales = pc.get_scaling_with_3D_filter
+    scales = pc.get_scaling #pc.get_scaling_with_3D_filter
     
     rotations = pc.rotation_activation(pc.splats["quats"])
     
@@ -103,11 +96,13 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         
         render_mode=gmode,
         
-        rasterize_mode='antialiased',
-        eps2d=0.3,
+        # rasterize_mode='antialiased',
+        # eps2d=0.3,
         
+        packed=False,
+        near_plane=0.01,
+        far_plane=1e10,
         sh_degree=sh_deg, #pc.active_sh_degree,
-        packed=True
     )
         
     return colors, alphas, meta
@@ -284,10 +279,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         # Process image
         if view_args['vis_mode'] == 'render':
             render = render.squeeze(0).permute(2,0,1)
-            
-            # ibl = render_IBL_source(viewpoint_camera, abc, texture)
-            # alpha = alpha.squeeze(-1)
-            # render = render * (alpha) + (1-alpha) * ibl
+    
             
         elif view_args['vis_mode'] == 'alpha':
             render = alpha

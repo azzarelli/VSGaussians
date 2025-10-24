@@ -25,6 +25,8 @@ class FourDGSdataset(Dataset):
             R=self.dataset[index].R, T=self.dataset[index].T,
             fx=self.dataset[index].fx, fy=self.dataset[index].fy,
             cx=self.dataset[index].cx, cy=self.dataset[index].cy,
+            k1=self.dataset[index].k1, k2=self.dataset[index].k2,
+            p1=self.dataset[index].p1, p2=self.dataset[index].p2,
             
             width=self.dataset[index].width, height=self.dataset[index].height,
 

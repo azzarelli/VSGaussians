@@ -230,8 +230,7 @@ class GaussianModel:
     def training_canonical_setup(self, training_args):        
         ##### Set-up GSplat optimizers #####
         self.percent_dense = training_args.percent_dense
-        print(self.spatial_lr_scale)
-        exit()
+
         if self.use_default_strategy:
             self.strategy = DefaultStrategy(
                 verbose=True,
@@ -445,6 +444,7 @@ class GaussianModel:
         PlyData([el]).write(path)
 
     def load_ply(self, path, training_args):
+        
         plydata = PlyData.read(path)
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
@@ -488,11 +488,21 @@ class GaussianModel:
         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
 
+        means = torch.tensor(xyz, dtype=torch.float, device="cuda")
+        xyz_min = means.min(0).values
+        xyz_max = means.max(0).values
+        self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)
+
         
-        self.active_sh_degree = self.max_sh_degree
-        
+        mean_foreground = means.mean(dim=0).unsqueeze(0)
+        dist_foreground = torch.norm(means - mean_foreground, dim=1)
+        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy() /5.
+
+        self.active_sh_degree = 3
+        print(f"Spatial lr scale: {self.spatial_lr_scale}")
+
         self.params = {
-            ("means", nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
+            ("means", nn.Parameter(means.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
             ("scales", nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.scaling_lr),
             ("quats", nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.rotation_lr),
             ("opacities",nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.opacity_lr),

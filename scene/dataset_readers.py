@@ -21,6 +21,11 @@ class CameraInfo(NamedTuple):
     fy: np.array
     cx: np.array
     cy: np.array
+    
+    k1: np.array
+    k2: np.array
+    p1: np.array
+    p2: np.array
 
     image_path: str
     canon_path:str
@@ -347,6 +352,10 @@ def readCamerasFromTransforms(path, transformsfile):
     g_cy = contents.get("cy", None)
     g_w = contents.get("w", None)
     g_h = contents.get("h", None)
+    g_k1 = contents.get("k1", None)
+    g_k2 = contents.get("k2", None)
+    g_p1 = contents.get("p1", None)
+    g_p2 = contents.get("p2", None)
 
     # Try to load Nerfstudio dataparser normalization (transform + scale)
     Tns = None
@@ -386,6 +395,13 @@ def readCamerasFromTransforms(path, transformsfile):
         cy = frame.get("cy", g_cy)
         w = frame.get("w", g_w)
         h = frame.get("h", g_h)
+        
+        k1 = frame.get("k1", g_k1)
+        k2 = frame.get("k2", g_k2)
+        p1 = frame.get("p1", g_p1)
+        p2 = frame.get("p2", g_p2)
+
+
 
         # Build c2w (OpenGL convention). Keep as-is; let renderer handle flips.
         c2w = np.eye(4, dtype=np.float32)
@@ -406,6 +422,7 @@ def readCamerasFromTransforms(path, transformsfile):
             uid=frame.get("colmap_im_id", idx),
             R=R, T=T,
             fx=fx, fy=fy, cx=cx, cy=cy,
+            k1=k1, k2=k2, p1=p1, p2=p2,
             width=w, height=h,
             image_path=image_path,
             canon_path=None,
@@ -450,6 +467,8 @@ def readCamerasFromCanon(path, canon_cams, M=19):
                     fx=cam.fx,
                     fy=cam.fy,
                     cx=cam.cx, cy=cam.cy,
+                    k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
+
                     width=cam.width, height=cam.height,
 
                     image_path=im_path, 

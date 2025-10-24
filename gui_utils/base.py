@@ -312,15 +312,15 @@ class GUIBase:
                     
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-                    self.iter_start.record()
+                    # self.iter_start.record()
                     
-                    # Depending on stage process a training step
-                    if self.stage == 'coarse':
-                        self.canonical_train_step(viewpoint_cams)
-                    else:
-                        self.train_step(viewpoint_cams)
+                    # # Depending on stage process a training step
+                    # if self.stage == 'coarse':
+                    #     self.canonical_train_step(viewpoint_cams)
+                    # else:
+                    #     self.train_step(viewpoint_cams)
 
-                    self.iter_end.record()
+                    # self.iter_end.record()
                 
                 else: # Initialize fine from coarse stage
                     if self.stage == 'coarse':
@@ -396,73 +396,57 @@ class GUIBase:
                 abc = self.trainable_abc()
                 texture = self.trainable_abc.background_texture
                 
-            if self.vis_mode != "triangles":
-                
-                buffer_image = render(
-                        cam,
-                        self.gaussians,
-                        abc,
-                        texture,
-                        view_args={
-                            "vis_mode":self.vis_mode,
-                            "stage":self.stage,
-                            "finecoarse_flag":self.finecoarse_flag
-                        },
-                )
+            
+            buffer_image = render(
+                    cam,
+                    self.gaussians,
+                    abc,
+                    texture,
+                    view_args={
+                        "vis_mode":self.vis_mode,
+                        "stage":self.stage,
+                        "finecoarse_flag":self.finecoarse_flag
+                    },
+            )
 
-                try:
-                    buffer_image = buffer_image["render"]
-                except:
-                    print(f'Mode "{self.vis_mode}" does not work')
-                    buffer_image = buffer_image['render']
-                    
-                # if buffer_image.shape[0] == 1:
-                #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
-                #     buffer_image = buffer_image.repeat(3,1,1)
+            try:
+                buffer_image = buffer_image["render"]
+            except:
+                print(f'Mode "{self.vis_mode}" does not work')
+                buffer_image = buffer_image['render']
+                
+            # if buffer_image.shape[0] == 1:
+            #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
+            #     buffer_image = buffer_image.repeat(3,1,1)
 
 
-                buffer_image = torch.nn.functional.interpolate(
-                    buffer_image.unsqueeze(0),
-                    size=(self.H,self.W),
-                    mode="bilinear",
-                    align_corners=False,
-                ).squeeze(0)
-                
-                try:
-                    if self.show_mask == 'occ':
-                        mask = cam.sceneoccluded_mask.squeeze(0).cuda()
-                    else:
-                        mask = 0.
-                    buffer_image[0] += mask*0.5
-                except:
-                    pass
-                
-                self.buffer_image = (
-                    buffer_image.permute(1, 2, 0)
-                    .contiguous()
-                    .clamp(0, 1)
-                    .contiguous()
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
+            buffer_image = torch.nn.functional.interpolate(
+                buffer_image.unsqueeze(0),
+                size=(self.H,self.W),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+            
+            try:
+                if self.show_mask == 'occ':
+                    mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+                else:
+                    mask = 0.
+                buffer_image[0] += mask*0.5
+            except:
+                pass
+            
+            self.buffer_image = (
+                buffer_image.permute(1, 2, 0)
+                .contiguous()
+                .clamp(0, 1)
+                .contiguous()
+                .detach()
+                .cpu()
+                .numpy()
+            )
 
-            else:
-                buffer_image = render_triangles(
-                        cam,
-                        self.gaussians,
-                        self.optix_runner
-                )
-                
-                self.buffer_image = (
-                    buffer_image
-                    .contiguous()
-                    .clamp(0, 1)
-                    .contiguous()
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
+
 
         t1 = time.time()
         
@@ -626,12 +610,7 @@ class GUIBase:
                     self.vis_mode = 'invariance'
                 def callback_toggle_show_deform(sender):
                     self.vis_mode = 'deform'
-                    
-                def callback_toggle_show_triangles(sender):
-                    self.vis_mode = 'triangles'
-                    
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_triangles)  
+
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
                     # dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
@@ -666,7 +645,6 @@ class GUIBase:
             cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
             cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
 
-            cam.update_projections()
         
 
         def drag_callback(sender, app_data):
