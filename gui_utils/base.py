@@ -305,6 +305,8 @@ class GUIBase:
                 dpg.set_value("_log_stage", self.stage)
 
                 if self.iteration <= self.final_iter:
+                    
+                    xyz_start = self.gaussians.get_xyz.shape[0]
                     # Get batch data
                     viewpoint_cams = self.get_batch_views
                     
@@ -328,6 +330,12 @@ class GUIBase:
                     else: # Stop trainnig once fine training is done
                         self.stage = 'done'
                         dpg.stop_dearpygui()
+                        
+                xyz_end = self.gaussians.get_xyz.shape[0]
+                
+                if xyz_start != xyz_end or self.iteration % 500 == 0:
+                    self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+
                 
                 # Test Step
                 if self.iteration % 2000 == 0:
@@ -704,8 +712,6 @@ class GUIBase:
             
             cam.R = R_c2w_new
                 
-            cam.update_projections()
-
         with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=zoom_callback_fov)
             dpg.add_mouse_drag_handler(callback=drag_callback)

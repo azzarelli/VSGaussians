@@ -35,13 +35,14 @@ class CameraInfo(NamedTuple):
     feature: torch.Tensor
    
 class SceneInfo(NamedTuple):
-    point_cloud: BasicPointCloud
     train_cameras: list
     test_cameras:list
     ba_cameras:list
+    mip_splat_cams:list
     video_cameras: list
     nerf_normalization: dict
     background_pth_ids:list
+    param_path:str
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -148,290 +149,17 @@ def fetchPly(path):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    
+    try:
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    except:
+        n_points = positions.shape[0]
+        normals = np.random.randn(n_points, 3)
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)  # normalize each to unit length
+
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
-
-
-def generateCamerasFromTransforms(path, template_transformsfile, extension, maxtime):
-    trans_t = lambda t : torch.Tensor([
-    [1,0,0,0],
-    [0,1,0,0],
-    [0,0,1,t],
-    [0,0,0,1]]).float()
-
-    rot_phi = lambda phi : torch.Tensor([
-        [1,0,0,0],
-        [0,np.cos(phi),-np.sin(phi),0],
-        [0,np.sin(phi), np.cos(phi),0],
-        [0,0,0,1]]).float()
-
-    rot_theta = lambda th : torch.Tensor([
-        [np.cos(th),0,-np.sin(th),0],
-        [0,1,0,0],
-        [np.sin(th),0, np.cos(th),0],
-        [0,0,0,1]]).float()
-    def pose_spherical(theta, phi, radius):
-        c2w = trans_t(radius)
-        c2w = rot_phi(phi/180.*np.pi) @ c2w
-        c2w = rot_theta(theta/180.*np.pi) @ c2w
-        c2w = torch.Tensor(np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]])) @ c2w
-        return c2w
-    cam_infos = []
-    # generate render poses and times
-    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,160+1)[:-1]], 0)
-    render_times = torch.linspace(0,maxtime,render_poses.shape[0])
-    with open(os.path.join(path, template_transformsfile)) as json_file:
-        template_json = json.load(json_file)
-        try:
-            fovx = template_json["camera_angle_x"]
-        except:
-            fovx = focal2fov(template_json["fl_x"], template_json['w'])
-
-    # breakpoint()
-    # load a single image to get image info.
-    for idx, frame in enumerate(template_json["frames"]):
-        cam_name = os.path.join(path, frame["file_path"] + extension)
-        image_path = os.path.join(path, cam_name)
-        image_name = Path(cam_name).stem
-        image = Image.open(image_path)
-        im_data = np.array(image.convert("RGBA"))
-        image = PILtoTorch(image,(800,800))
-        break
-    # format information
-    for idx, (time, poses) in enumerate(zip(render_times,render_poses)):
-        time = time/maxtime
-        matrix = np.linalg.inv(np.array(poses))
-        R = -np.transpose(matrix[:3,:3])
-        R[:,0] = -R[:,0]
-        T = -matrix[:3, 3]
-        fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
-        FovY = fovy 
-        FovX = fovx
-        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=None, image_name=None, width=image.shape[1], height=image.shape[2],
-                            time = time, mask=None))
-    return cam_infos
-
-def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png", mapper = {}):
-    cam_infos = []
-
-    with open(os.path.join(path, transformsfile)) as json_file:
-        contents = json.load(json_file)
-        try:
-            fovx = contents["camera_angle_x"]
-        except:
-            fovx = focal2fov(contents['fl_x'],contents['w'])
-        frames = contents["frames"]
-        for idx, frame in enumerate(frames):
-            cam_name = os.path.join(path, frame["file_path"] + extension)
-            time = mapper[frame["time"]]
-            matrix = np.linalg.inv(np.array(frame["transform_matrix"]))
-            matrix = np.linalg.inv(np.array(frame["transform_matrix"]))
-            R = -np.transpose(matrix[:3,:3])
-            R[:,0] = -R[:,0]
-            T = -matrix[:3, 3]
-
-            image_path = os.path.join(path, cam_name)
-            image_name = Path(cam_name).stem
-            image = Image.open(image_path)
-
-            im_data = np.array(image.convert("RGBA"))
-
-            bg = np.array([1,1,1]) if white_background else np.array([0, 0, 0])
-
-            norm_data = im_data / 255.0
-            arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-            image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
-            image = PILtoTorch(image,(800,800))
-            fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
-            FovY = fovy 
-            FovX = fovx
-
-            cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=image_path, image_name=image_name, width=image.shape[1], height=image.shape[2],
-                            time = time, mask=None))
-            
-    return cam_infos
-
-from scipy.spatial.transform import Rotation
-OPENGL = np.array([[1, 0, 0, 0],
-                   [0, -1, 0, 0],
-                   [0, 0, -1, 0],
-                   [0, 0, 0, 1]])
-
-def readStudioCams(path, cams2world, focal, H, W, xyz, N, downsample=2):    
-    path2imgs = os.path.join(path, 'images')
-    path2diff = os.path.join(path, 'differences')
-    cams = sorted(os.listdir(path2imgs))
-
-    # upsample intrinsics to match the original image
-    focal = focal * 3.75
-    W = 1920
-    H = 1080
     
-    fovx = focal2fov(focal, W)
-    fovy = focal2fov(focal, H)
-    W = 1920 // downsample
-    H = 1080 // downsample
-    cam_infos = []
 
-    rot = np.eye(4)
-    rot[:3, :3] = Rotation.from_euler('y', np.deg2rad(180)).as_matrix()
-    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
-    cams2world_aligned = [ (global_T @ c2w) for c2w in cams2world ]
-    
-    pts_h = np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)
-    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
-
-    xyz = (global_T @ pts_h.T).T[:, :3]
-    im_name = '000.png'
-    background_pth_ids = []
-    cnt = 0
-    for idx, pose in enumerate(cams2world_aligned):
-        for ids, im_name in enumerate(sorted(os.listdir(os.path.join(path2imgs, cams[idx])))):
-            image_path = os.path.join(path2imgs, cams[idx], im_name)
-            so_path = os.path.join(path, "meta", "masks", f"{cams[idx]}.png")
-            canon_path = os.path.join(path, "meta", "canonical_0", f"{cams[idx]}.jpg")
-            b_path = os.path.join(path, "meta", "backgrounds", f"{im_name[:-4]}.png")
-            diff_path = os.path.join(path2diff, cams[idx], im_name.replace('.jpg', '.pt'))
-            
-            w2c = np.linalg.inv(pose)
-            R = pose[:3,:3] # rotation
-            T = w2c[:3,3] 
-            
-            cx =  W / 2.0
-            cy = H / 2.0
-            fx = 0.5 * W / np.tan(fovx * 0.5)
-            fy = 0.5 * H / np.tan(fovy * 0.5)
-            
-            w = W
-            h = H
-
-            cam_infos.append(
-                CameraInfo(
-                    R=R, T=T,
-                    cx=cx, cy=cy, fx=fx, fy=fy,
-                    width=w, height=h,
-                    
-                    image_path=image_path, 
-                    so_path=so_path,
-                    b_path=b_path,
-                    diff_path=diff_path,
-                    canon_path=canon_path,
-                    
-                    uid=cnt,
-                    time = float(ids%N)/N, feature=0.
-                )
-            )
-            background_pth_ids.append(b_path)
-            cnt +=1
-    return cam_infos, xyz, background_pth_ids
-
-
-def readCanonicalCams(path, cams2world, focal, H, W, downsample=2):    
-    path2imgs = os.path.join(path, 'meta', 'canonical_0')
-    cams = sorted(os.listdir(path2imgs))
-
-    # upsample intrinsics to match the original image
-    focal = focal * 3.75
-    W = 1920
-    H = 1080
-    fovx = focal2fov(focal, W)
-    fovy = focal2fov(focal, H)
-    W = 1920 //downsample
-    H = 1080 //downsample
-    
-    cam_infos = []
-
-    rot = np.eye(4)
-    rot[:3, :3] = Rotation.from_euler('y', np.deg2rad(180)).as_matrix()
-    global_T = np.linalg.inv(cams2world[0] @ OPENGL @ rot)
-    cams2world_aligned = [ (global_T @ c2w) for c2w in cams2world ]
-    
-    for idx, pose in enumerate(cams2world_aligned):
-        # Construct path to canonical image
-        image_path = os.path.join(path2imgs, f"{cams[idx]}")
-        so_path = os.path.join(path, "meta", "masks", f"{cams[idx].replace('.jpg', '.png')}")
-
-        # Define the camera calibration settings
-        w2c = np.linalg.inv(pose)
-        R = pose[:3,:3]
-        T = w2c[:3,3] 
-        
-        cx =  W / 2.0
-        cy = H / 2.0
-        fx = 0.5 * W / np.tan(fovx * 0.5)
-        fy = 0.5 * H / np.tan(fovy * 0.5)
-        
-        w = W
-        h = H
-        cam_infos.append(
-            CameraInfo(
-                R=R, T=T,
-                cx=cx, cy=cy, fx=fx, fy=fy,
-                width=w, height=h,
-                
-                image_path=image_path, 
-                so_path=so_path,
-                b_path=None,
-                diff_path=None,
-                
-                uid=idx,
-                time = 0., feature=0.
-            )
-        )
-
-    return cam_infos
-
-
-def readHomeStudioInfo(path, N=98, downsample=2):
-    print("Reading Training Data")
-    # Load camera data (generated from mast3r)
-    meta_pth = os.path.join(path, 'meta', 'info.json')
-    with open(meta_pth, "r") as f:
-        meta = json.load(f)
-
-    # Camera pose data
-    focal = meta['focals'][0] # shared intrinsics
-    W,H = meta['imsize'][0][0], meta['imsize'][0][1]
-    poses = meta['cams2world']
-    c2w = []
-    for pose in poses:
-        c2w.append(np.array(pose))
-    
-    # Load initial point cloud and colors
-    pcd_path = os.path.join(path, 'meta', 'pointcloud.npy')
-    pcd = np.load(pcd_path, allow_pickle=True)
-    pts = pcd[::5, :3]
-    col = pcd[::5, 3:]
-
-    # Get training cameras
-    train_cams, pts, background_pth_ids = readStudioCams(path, c2w, focal, H, W, pts, N, downsample)
-    
-    # TODO: Define testing method
-    # For now just use the first camera as test
-    test_cams = [cam for i, cam in enumerate(train_cams) if i%N in [0, 1, 2]]
-    train_cams = [cam for i, cam in enumerate(train_cams) if i%N not in [0, 1, 2]]
-    
-    # We also need to define a dataset for bundle adjusting the screen and cams
-    BA_cams = [train_cams[i] for i in range(len(train_cams)) if i % N == 0]
-
-    nerf_normalization = getNerfppNorm(train_cams)
-    
-    pcd = BasicPointCloud(points=pts, colors=col, normals=np.zeros((pts.shape[0], 3)))
-
-    scene_info = SceneInfo(
-        point_cloud=pcd,
-        train_cameras=train_cams,
-        test_cameras=test_cams,
-        video_cameras=train_cams,
-
-        ba_cameras=BA_cams,
-        
-        nerf_normalization=nerf_normalization,
-        background_pth_ids=background_pth_ids
-    )
-    return scene_info
 
 def process_relighting_cams(path, unsorted_cams, N=100):
     path2canons = os.path.join(path, 'meta', 'canonical_0')
@@ -534,7 +262,7 @@ def downsample_pointcloud_voxel_target(pcd, target_points=100_000, max_iter=10, 
         normals=np.asarray(best_pcd.normals)
     )
 
-def readStudio4Info(path, N=98, downsample=2):
+def readColmapInfo(path, N=98, downsample=2):
     """Construct data frames for each typice
     
     Notes:
@@ -558,7 +286,7 @@ def readStudio4Info(path, N=98, downsample=2):
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
     
     
-    path2images = os.path.join(path, 'meta', 'canonical_1_pose_estimation')
+    path2images = os.path.join(path2colmap, 'dense', 'images')
     cam_infos_unsorted, image_names = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path2images)
     sorted_pairs = sorted(zip(image_names, cam_infos_unsorted), key=lambda x: x[0])
     image_names, canon_cam_infos = zip(*sorted_pairs)
@@ -570,6 +298,9 @@ def readStudio4Info(path, N=98, downsample=2):
     test_idx_set = [i for i in range(10)]
     test_cams = [cam for idx, cam in enumerate(relighting_cams) if (idx % 100) in test_idx_set  ]
     relighting_cams = [cam for idx, cam in enumerate(relighting_cams) if (idx % 100) not in test_idx_set]
+    
+    M = N - len(test_idx_set)
+    mip_splat_cams = [cam for i, cam in enumerate(relighting_cams) if i%M == 0]
     
     # Get sparse colmap point cloud
     ply_path = os.path.join(path2colmap, "dense/fused.ply")
@@ -589,14 +320,194 @@ def readStudio4Info(path, N=98, downsample=2):
         train_cameras=relighting_cams,
         test_cameras=test_cams,
         video_cameras=canon_cam_infos,
-
+        mip_splat_cams=mip_splat_cams,
+        
         ba_cameras=canon_cam_infos,
         
         nerf_normalization=nerf_normalization,
-        background_pth_ids=background_paths
+        background_pth_ids=background_paths,
+        splats=None
+    )
+    return scene_info
+
+def opengl_to_opencv(c2w: np.ndarray) -> np.ndarray:
+    flip = np.diag([1.0, -1.0, -1.0, 1.0]).astype(c2w.dtype)
+    return c2w @ flip
+def readCamerasFromTransforms(path, transformsfile):
+    cam_infos = []
+
+    tf_path = os.path.join(path, transformsfile)
+    with open(tf_path) as json_file:
+        contents = json.load(json_file)
+
+    # Global intrinsics fallbacks
+    g_fx = contents.get("fl_x", None)
+    g_fy = contents.get("fl_y", None)
+    g_cx = contents.get("cx", None)
+    g_cy = contents.get("cy", None)
+    g_w = contents.get("w", None)
+    g_h = contents.get("h", None)
+
+    # Try to load Nerfstudio dataparser normalization (transform + scale)
+    Tns = None
+    s_ns = None
+    dp_candidates = [
+        os.path.join(path, "dataparser_transforms.json"),
+        os.path.join(path, "checkpoint", "dataparser_transforms.json"),
+        os.path.join(path, "nstudio", "checkpoint", "dataparser_transforms.json"),
+    ]
+    for dp_path in dp_candidates:
+        if os.path.exists(dp_path):
+            with open(dp_path) as f:
+                dp = json.load(f)
+            Tns = np.eye(4, dtype=np.float32)
+            tf = np.array(dp["transform"], dtype=np.float32)  # 3x4 [R|t]
+            Tns[:3, :3] = tf[:, :3]
+            Tns[:3, 3] = tf[:, 3]
+            s_ns = float(dp["scale"])
+            break
+
+    # Fallback: apply top-level scale/offset in transforms.json (if present)
+    if Tns is None:
+        top_scale = contents.get("scale", None)
+        top_offset = contents.get("offset", None)
+        if (top_scale is not None) or (top_offset is not None):
+            Tns = np.eye(4, dtype=np.float32)
+            if top_offset is not None:
+                Tns[:3, 3] = np.array(top_offset, dtype=np.float32)
+            s_ns = float(top_scale) if top_scale is not None else 1.0
+
+    frames = contents["frames"]
+    for idx, frame in enumerate(frames):
+        # Per-frame intrinsics override globals if present
+        fx = frame.get("fl_x", g_fx)
+        fy = frame.get("fl_y", g_fy)
+        cx = frame.get("cx", g_cx)
+        cy = frame.get("cy", g_cy)
+        w = frame.get("w", g_w)
+        h = frame.get("h", g_h)
+
+        # Build c2w (OpenGL convention). Keep as-is; let renderer handle flips.
+        c2w = np.eye(4, dtype=np.float32)
+        c2w[:3, :4] = np.array(frame["transform_matrix"], dtype=np.float32)[:3, :4]
+
+        # Apply dataparser normalization if available
+        if Tns is not None:
+            c2w = Tns @ c2w
+            c2w[:3, 3] *= s_ns
+
+        R = c2w[:3, :3]
+        T = c2w[:3, 3]
+
+        # Resolve image path robustly
+        image_path = os.path.normpath(os.path.join(path, frame["file_path"]))
+
+        cam_infos.append(CameraInfo(
+            uid=frame.get("colmap_im_id", idx),
+            R=R, T=T,
+            fx=fx, fy=fy, cx=cx, cy=cy,
+            width=w, height=h,
+            image_path=image_path,
+            canon_path=None,
+            so_path=None,
+            b_path=None,
+            diff_path=None,
+            time=float(frame.get("time", -1.0)),
+            feature=None,
+        ))
+
+    return cam_infos
+
+
+
+def readCamerasFromCanon(path, canon_cams, M=19):
+    
+    background_path = os.path.join(path, 'meta', 'backgrounds')
+    background_im_paths = [os.path.join(background_path, f) for f in sorted(os.listdir(background_path))]
+    relit_path = os.path.join(path, 'meta', 'images')
+    masks_path = os.path.join(path, 'meta', 'masks')
+
+    # Get the colmap id for the first relit camera (i.e. the last 19 frames of the nerfstudio dataset)
+    N = len(canon_cams) - M
+    L = len(background_im_paths)
+    
+    relit_cams = []
+    for cam in canon_cams:
+        if cam.uid > N:
+            cam_id = cam.uid - N
+            cam_name = f'cam{cam_id:02}'
+            
+            for background_id, b_path in enumerate(background_im_paths):
+                im_name = b_path.split('/')[-1].replace('png', 'jpg') # e.g. '000.jpg'
+                im_path = os.path.join(relit_path, cam_name, im_name)
+                mask_path = os.path.join(masks_path, f'{cam_name}.png')
+                
+                time = background_id / L
+                cam_info = CameraInfo(
+                    uid=cam.uid, 
+                    R=cam.R, T=cam.T,
+                    
+                    fx=cam.fx,
+                    fy=cam.fy,
+                    cx=cam.cx, cy=cam.cy,
+                    width=cam.width, height=cam.height,
+
+                    image_path=im_path, 
+                    canon_path=cam.image_path,
+                    so_path=mask_path,
+                    b_path=b_path,
+                    diff_path = None,
+                    time = time,
+                    feature=None, 
+                )
+                relit_cams.append(cam_info)
+
+    return relit_cams, background_im_paths, L
+
+def readNerfstudioInfo(path, N=98, downsample=2):
+    """Construct dataset from nerfstudio
+    """
+    print("Reading nerfstudio data ...")
+    # Read camera transforms    
+    canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos)
+    
+    # split into training and test dataset
+    test_idx_set = [i for i in range(10)]
+    test_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) in test_idx_set]
+    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in test_idx_set]
+    
+    # generate mipsplatting confid data
+    M = N - len(test_idx_set)
+    mip_splat_cams = [cam for i, cam in enumerate(relighting_cams) if i%M == 0]
+    
+    nerf_normalization = getNerfppNorm(relighting_cams)
+    
+    
+    # Get sparse colmap point cloud
+    # ply_path = os.path.join(path, "sparse_pc.ply")
+    # pcd = fetchPly(ply_path)
+    # splat_path = os.path.join(path, "splat/splat.ply")
+    # plydata = PlyData.read(splat_path)
+
+    
+    scene_info = SceneInfo(
+        train_cameras=relighting_cams,
+        test_cameras=test_cams,
+        video_cameras=canon_cam_infos,
+        mip_splat_cams=mip_splat_cams,
+        
+        ba_cameras=canon_cam_infos,
+        
+        nerf_normalization=nerf_normalization,
+        background_pth_ids=background_paths,
+
+        param_path=os.path.join(path, 'splat','splat.ply')
+
     )
     return scene_info
 
 sceneLoadTypeCallbacks = {
-    "homestudio": readStudio4Info
+    "colmap": readColmapInfo,
+    "nerfstudio": readNerfstudioInfo
 }

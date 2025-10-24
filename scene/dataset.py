@@ -13,10 +13,9 @@ class FourDGSdataset(Dataset):
         self.dataset_type = dataset_type
         
         self.loading_flags = {
-            "image":True,
-            "canon":True if dataset_type == 'train' else False,
-
-            "scene_occluded":True if dataset_type == 'train' or dataset_type == 'test'  else False,
+            "image":True if dataset_type != 'mipsplat' else False,
+            "canon":True if dataset_type in ['train'] else False,
+            "scene_occluded":True if dataset_type in ['train', 'test']  else False,
             "differences":False,
         }
         

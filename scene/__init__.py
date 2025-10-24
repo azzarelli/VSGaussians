@@ -36,8 +36,10 @@ class Scene:
 
         max_frames = 100
         num_cams = 19
-        scene_info = sceneLoadTypeCallbacks["homestudio"](args.source_path, max_frames, downsample=downsample)
-        dataset_type="condense"
+        dataset_type="nerfstudio"
+        # dataset_type="colmap"
+
+        scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, downsample=downsample)
         
         self.maxframes = max_frames
         self.num_cams = num_cams
@@ -48,13 +50,13 @@ class Scene:
         self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
                 
         self.canonical_camera = FourDGSdataset(scene_info.ba_cameras, "canon")
-
+        
+        self.mipsplatting_cameras = FourDGSdataset(scene_info.mip_splat_cams, "mipsplat")
+        
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
         
         self.ibl = IBLBackround(scene_info.background_pth_ids)
-        
-        self.point_cloud = scene_info.point_cloud
-        
+                
         if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
 
@@ -68,7 +70,13 @@ class Scene:
                                                     "iteration_" + str(self.loaded_iter),
                                                 ))
         else:
-            self.gaussians.create_from_pcd(self.point_cloud, opt)
+            if scene_info.param_path is not None:
+                self.gaussians.load_ply(
+                    scene_info.param_path,
+                    opt
+                )
+            else:
+                self.gaussians.create_from_pcd(scene_info.param_path, opt)
             
     def save(self, iteration, stage):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

@@ -77,15 +77,15 @@ class Camera(nn.Module):
         self.trans = trans
         self.scale = scale
         
-        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1)
+        # self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1)
         
-        self.projection_matrix = getProjectionMatrixFromIntrinsics(
-            self.fx, self.fy, self.cx, self.cy, self.image_width, self.image_height,
-            self.znear, self.zfar
-        ).transpose(0, 1)
-        # .cuda()
-        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
-        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        # self.projection_matrix = getProjectionMatrixFromIntrinsics(
+        #     self.fx, self.fy, self.cx, self.cy, self.image_width, self.image_height,
+        #     self.znear, self.zfar
+        # ).transpose(0, 1)
+        # # .cuda()
+        # # self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        # self.camera_center = self.world_view_transform.inverse()[3, :3]
 
         #
         self.image_path=image_path
@@ -109,11 +109,11 @@ class Camera(nn.Module):
     @property
     def pose(self):# Get the c2w 
         Rt = np.zeros((4, 4))
-        Rt[:3, :3] = self.R.transpose()
+        Rt[:3, :3] = self.R
         Rt[:3, 3] = self.T
         Rt[3, 3] = 1.0
 
-        C2W = torch.from_numpy(np.linalg.inv(Rt)).cuda().float()
+        C2W = torch.from_numpy(Rt).cuda().float()
         return C2W
 
     def generate_rays(self, c2w=None, H=None, W=None, fx=None, fy=None, cx=None, cy=None, device="cuda", ctype="none"):
@@ -191,16 +191,16 @@ class Camera(nn.Module):
 
         return sampled
     
-    def update_projections(self):
-        self.world_view_transform = torch.tensor(getWorld2View2(self.R, self.T, self.trans, self.scale)).transpose(0, 1)
+    # def update_projections(self):
+    #     self.world_view_transform = torch.tensor(getWorld2View2(self.R, self.T, self.trans, self.scale)).transpose(0, 1)
         
-        self.projection_matrix = getProjectionMatrixFromIntrinsics(
-            self.fx, self.fy, self.cx, self.cy, self.image_width, self.image_height,
-            self.znear, self.zfar
-        ).transpose(0, 1)
+    #     self.projection_matrix = getProjectionMatrixFromIntrinsics(
+    #         self.fx, self.fy, self.cx, self.cy, self.image_width, self.image_height,
+    #         self.znear, self.zfar
+    #     ).transpose(0, 1)
 
-        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
-        self.camera_center = self.world_view_transform.inverse()[3, :3]
+    #     self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+    #     self.camera_center = self.world_view_transform.inverse()[3, :3]
     
     def load_image_from_flags(self, tag):
         if tag == "image":

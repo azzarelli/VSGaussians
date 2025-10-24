@@ -18,59 +18,46 @@ def render_IBL_source(cam, abc, texture, device="cuda"):
 def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
-    opacity = pc.get_opacity
-
-    scales = pc.get_scaling
-    rotations = pc.splats["quats"]
     
+    opacity = pc.get_opacity_with_3D_filter
 
-    rotations = pc.rotation_activation(rotations)
+    scales = pc.get_scaling_with_3D_filter
+    
+    rotations = pc.rotation_activation(pc.splats["quats"])
     
         
     return means3D, rotations, opacity, colors, scales
 
-def process_overfit_Gaussians(pc, time):
-    means3D = pc.get_xyz
-    colors = pc.get_features
-    opacity = pc.get_opacity
-
-    scales = pc.get_scaling
-    rotations = pc.splats["quats"]
-    
-    invariance = pc.get_invariance_coefficient    
-
-    means3D, rotations, opacity, colors, extras = pc._deformation(
-        point=means3D, 
-        rotations=rotations,
-        scales=scales,
-        times_sel=time,
-        invariance=invariance,
-        h_emb=opacity,
-        shs=colors,
-    )
-
-    rotations = pc.rotation_activation(rotations)
-    
-    return means3D, rotations, opacity, colors, scales, invariance
- 
- 
 def process_Gaussians_triplane(pc):
-    means3D = pc.get_xyz
-    colors = pc.get_features
-    opacity = pc.get_opacity
-
-    scales = pc.get_scaling
-    rotations = pc.splats["quats"]
+    # Use existing function for processing canon
+    means3D, rotations, opacity, colors, scales = process_Gaussians(pc)
     
+    # Sample color deformation
     texsample, texscale, invariance = pc._deformation(
         point=means3D,
     )
-    
-    rotations = pc.rotation_activation(rotations)
-    
+        
     return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
 
- 
+
+# @torch_compile()
+def get_viewmat(optimized_camera_to_world):
+    """
+    function that converts c2w to gsplat world2camera matrix, using compile for some speed
+    """
+    R = optimized_camera_to_world[:, :3, :3]  # 3 x 3
+    T = optimized_camera_to_world[:, :3, 3:4]  # 3 x 1
+    # flip the z and y axes to align with gsplat conventions
+    R = R * torch.tensor([[[1, -1, -1]]], device=R.device, dtype=R.dtype)
+    # analytic matrix inverse to get world2camera matrix
+    R_inv = R.transpose(1, 2)
+    T_inv = -torch.bmm(R_inv, T)
+    viewmat = torch.zeros(R.shape[0], 4, 4, device=R.device, dtype=R.dtype)
+    viewmat[:, 3, 3] = 1.0  # homogenous
+    viewmat[:, :3, :3] = R_inv
+    viewmat[:, :3, 3:4] = T_inv
+    return viewmat
+
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
         gmode = 'RGB+D'
@@ -86,7 +73,11 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         w2c = []
         for c in cam:
             intr.append(c.intrinsics.unsqueeze(0))
-            w2c.append(c.world_view_transform.transpose(0,1).unsqueeze(0))
+            c2w = c.pose
+            
+            viewmat = get_viewmat(c2w.unsqueeze(0))
+            w2c.append(viewmat)
+            
         intr = torch.cat(intr, dim=0)
         w2c = torch.cat(w2c, dim=0)
         width = c.image_width
@@ -96,12 +87,14 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
             w2c = w2c.unsqueeze(1)
     except:
         intr = cam.intrinsics.unsqueeze(0)
-        w2c = cam.world_view_transform.transpose(0,1).unsqueeze(0)
+        c2w = cam.pose
+        viewmat = get_viewmat(c2w.unsqueeze(0))
+        w2c = viewmat
         width = cam.image_width
         height = cam.image_height
+        
     # Typical RGB render of base color
     colors, alphas, meta = rasterization(
-    # colors, alphas, meta = rasterization(
         means3D, rotation, scales, opacity.squeeze(-1), colors,
         w2c.cuda(), 
         intr.cuda(),
@@ -109,8 +102,10 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         height,
         
         render_mode=gmode,
-        # rasterize_mode='antialiased',
-        # eps2d=0.1,
+        
+        rasterize_mode='antialiased',
+        eps2d=0.3,
+        
         sh_degree=sh_deg, #pc.active_sh_degree,
         packed=True
     )

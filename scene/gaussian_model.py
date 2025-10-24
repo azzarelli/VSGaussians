@@ -26,7 +26,8 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.deformation import deform_network
 from scene.regulation import compute_plane_smoothness
 
-from gsplat import DefaultStrategy
+from gsplat import DefaultStrategy, MCMCStrategy
+from plyfile import PlyData, PlyElement
 
 class GaussianModel:
 
@@ -63,6 +64,7 @@ class GaussianModel:
         self.spatial_lr_scale_background = 0
         self.target_neighbours = None
         
+        self.use_default_strategy = False
         
         self.setup_functions()
 
@@ -74,6 +76,7 @@ class GaussianModel:
             self.hex_optimizer.state_dict(),
             self.spatial_lr_scale,
             self.spatial_lr_scale_background,
+            self.filter_3D
         )
 
     def restore(self, model_args, training_args):
@@ -81,13 +84,58 @@ class GaussianModel:
         deform_state,
         self.splats,
         opt_dict,
-        self.spatial_lr_scale,self.spatial_lr_scale_background) = model_args
+        self.spatial_lr_scale,self.spatial_lr_scale_background,self.filter_3D) = model_args
         
         self._deformation.load_state_dict(deform_state)
         self.training_setup(training_args)
 
         self.hex_optimizer.load_state_dict(opt_dict)
 
+    @torch.no_grad()
+    def compute_3D_filter(self, cameras):
+        #TODO consider focal length and image width
+        xyz = self.get_xyz
+        distance = torch.ones((xyz.shape[0]), device=xyz.device) * 100000.0
+        valid_points = torch.zeros((xyz.shape[0]), device=xyz.device, dtype=torch.bool)
+        
+        # we should use the focal length of the highest resolution camera
+        focal_length = 0.
+        for camera in cameras:
+
+            # transform points to camera space
+            R = torch.tensor(camera.R, device=xyz.device, dtype=torch.float32)
+            T = torch.tensor(camera.T, device=xyz.device, dtype=torch.float32)
+             # R is stored transposed due to 'glm' in CUDA code so we don't neet transopse here
+            xyz_cam = xyz @ R + T[None, :]
+                        
+            # project to screen space
+            valid_depth = xyz_cam[:, 2] > 0.1
+            
+            
+            x, y, z = xyz_cam[:, 0], xyz_cam[:, 1], xyz_cam[:, 2]
+            z = torch.clamp(z, min=0.001)
+            
+            x = x / z * camera.fx + camera.image_width / 2.0
+            y = y / z * camera.fy + camera.image_height / 2.0
+            
+            # in_screen = torch.logical_and(torch.logical_and(x >= 0, x < camera.image_width), torch.logical_and(y >= 0, y < camera.image_height))
+            
+            # use similar tangent space filtering as in the paper
+            in_screen = torch.logical_and(torch.logical_and(x >= -0.15 * camera.image_width, x <= camera.image_width * 1.15), torch.logical_and(y >= -0.15 * camera.image_height, y <= 1.15 * camera.image_height))
+            
+        
+            valid = torch.logical_and(valid_depth, in_screen)
+            
+            # distance[valid] = torch.min(distance[valid], xyz_to_cam[valid])
+            distance[valid] = torch.min(distance[valid], z[valid])
+            valid_points = torch.logical_or(valid_points, valid)
+            if focal_length < camera.fx:
+                focal_length = camera.fx
+        
+        distance[~valid_points] = distance[valid_points].max()
+        #TODO box to gaussian transform
+        filter_3D = distance / focal_length * (0.2 ** 0.5)
+        self.filter_3D = filter_3D[..., None]
 
     @property
     def get_features(self):
@@ -100,6 +148,14 @@ class GaussianModel:
         return self.scaling_activation(self.splats["scales"])
     
     @property
+    def get_scaling_with_3D_filter(self):
+        scales = self.get_scaling
+        
+        scales = torch.square(scales) + torch.square(self.filter_3D)
+        scales = torch.sqrt(scales)
+        return scales
+    
+    @property
     def get_rotation(self):
         return self.rotation_activation(self.splats["quats"])
 
@@ -110,6 +166,21 @@ class GaussianModel:
     @property
     def get_opacity(self):
         return torch.sigmoid(self.splats["opacities"])
+    
+    @property
+    def get_opacity_with_3D_filter(self):
+        opacity = torch.sigmoid(self.get_opacity[:, 0]).unsqueeze(-1)
+        # apply 3D filter
+        scales = self.get_scaling
+        
+        scales_square = torch.square(scales)
+        det1 = scales_square.prod(dim=1)
+        
+        scales_after_square = scales_square + torch.square(self.filter_3D) 
+        det2 = scales_after_square.prod(dim=1) 
+        coef = torch.sqrt(det1 / det2)
+        return opacity * coef[..., None]
+    
     
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self.get_rotation)
@@ -159,59 +230,88 @@ class GaussianModel:
     def training_canonical_setup(self, training_args):        
         ##### Set-up GSplat optimizers #####
         self.percent_dense = training_args.percent_dense
-        
-        self.strategy = DefaultStrategy(
-            verbose=True,
-            prune_opa=0.005,
-            grow_grad2d=0.0001,
-            grow_scale3d=0.01,
-            grow_scale2d=0.1,
-            
-            prune_scale3d=0.2,
-            
-            # refine_scale2d_stop_iter=4000, # splatfacto behavior
-            refine_start_iter=training_args.densify_from_iter,
-            refine_stop_iter=training_args.densify_until_iter,
-            reset_every=training_args.opacity_reset_interval,
-            refine_every=training_args.densification_interval,
-            absgrad=False,
-            revised_opacity=False,
-            key_for_gradient="means2d",
-            
-        )
-        self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
-        self.strategy_state = self.strategy.initialize_state(
-                scene_scale=self.spatial_lr_scale
-        )
+        print(self.spatial_lr_scale)
+        exit()
+        if self.use_default_strategy:
+            self.strategy = DefaultStrategy(
+                verbose=True,
+                prune_opa=0.005,
+                grow_grad2d=0.0001,
+                grow_scale3d=0.01,
+                grow_scale2d=0.1,
+                
+                prune_scale3d=0.2,
+                
+                # refine_scale2d_stop_iter=4000, # splatfacto behavior
+                refine_start_iter=training_args.densify_from_iter,
+                refine_stop_iter=training_args.densify_until_iter,
+                reset_every=training_args.opacity_reset_interval,
+                refine_every=training_args.densification_interval,
+                absgrad=False,
+                revised_opacity=False,
+                key_for_gradient="means2d",
+                
+            )
+            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
+            self.strategy_state = self.strategy.initialize_state(
+                    scene_scale=self.spatial_lr_scale
+            )
+        else:
+            self.strategy = MCMCStrategy(
+                cap_max=2_000_000,            # optional ceiling on splats
+                noise_lr=5e5,                 # strength of the random walk
+                refine_start_iter=500,
+                refine_stop_iter=training_args.densify_until_iter,
+                refine_every=training_args.densification_interval,
+                min_opacity=0.01,             # prune floor; match the rest of your pipeline
+                verbose=True
+            )
+            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
+            self.strategy_state = self.strategy.initialize_state()
+
         
         
     def training_setup(self, training_args):        
         ##### Set-up GSplat optimizers #####
         self.percent_dense = training_args.percent_dense
         
-        self.strategy = DefaultStrategy(
-            verbose=True,
-            prune_opa=0.005,
-            grow_grad2d=0.0001,
-            grow_scale3d=0.01,
-            grow_scale2d=0.1,
-            
-            prune_scale3d=0.2,
-            
-            # refine_scale2d_stop_iter=4000, # splatfacto behavior
-            refine_start_iter=training_args.densify_from_iter,
-            refine_stop_iter=training_args.densify_until_iter,
-            reset_every=3000,#training_args.opacity_reset_interval,
-            refine_every=training_args.densification_interval,
-            absgrad=False,
-            revised_opacity=False,
-            key_for_gradient="means2d",
-            
-        )
-        self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
-        self.strategy_state = self.strategy.initialize_state(
-                scene_scale=self.spatial_lr_scale
-        )
+        if self.use_default_strategy:
+            self.strategy = DefaultStrategy(
+                verbose=True,
+                prune_opa=0.005,
+                grow_grad2d=0.0001,
+                grow_scale3d=0.01,
+                grow_scale2d=0.1,
+                
+                prune_scale3d=0.2,
+                
+                # refine_scale2d_stop_iter=4000, # splatfacto behavior
+                refine_start_iter=training_args.densify_from_iter,
+                refine_stop_iter=training_args.densify_until_iter,
+                reset_every=3000,#training_args.opacity_reset_interval,
+                refine_every=training_args.densification_interval,
+                absgrad=False,
+                revised_opacity=False,
+                key_for_gradient="means2d",
+                
+            )
+            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
+            self.strategy_state = self.strategy.initialize_state(
+                    scene_scale=self.spatial_lr_scale
+            )
+        else:
+            self.strategy = MCMCStrategy(
+                cap_max=2_000_000,            # optional ceiling on splats
+                noise_lr=5e5,                 # strength of the random walk
+                refine_start_iter=500,
+                refine_stop_iter=training_args.densify_until_iter,
+                refine_every=training_args.densification_interval,
+                min_opacity=0.01,             # prune floor; match the rest of your pipeline
+                verbose=True
+            )
+            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
+            self.strategy_state = self.strategy.initialize_state()
+
         
         
         ##### Set-up hex-plane optimizers #####
@@ -268,14 +368,26 @@ class GaussianModel:
         )
         
     def post_backward(self, iteration, info, stage):
-        self.strategy.step_post_backward(
-            params=self.splats,
-            optimizers=self.gsplat_optimizers,
-            state=self.strategy_state,
-            step=iteration,
-            info=info,
-            packed=True,
-        )
+        if self.use_default_strategy:
+            self.strategy.step_post_backward(
+                params=self.splats,
+                optimizers=self.gsplat_optimizers,
+                state=self.strategy_state,
+                step=iteration,
+                info=info,
+                packed=True,
+            )
+        else:
+            means_lr = self.gsplat_optimizers["means"].param_groups[0]["lr"]
+            self.strategy.step_post_backward(
+                params=self.splats,
+                optimizers=self.gsplat_optimizers,
+                state=self.strategy_state,
+                step=iteration,
+                info=info,
+                lr=means_lr,
+            )
+
         for optimizer in self.gsplat_optimizers.values():
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
@@ -340,7 +452,7 @@ class GaussianModel:
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         
         opac_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("opacity")]
-        opac_names = sorted(opac_names, key = lambda x: int(x.split('_')[-1]))
+
         opacities = np.zeros((xyz.shape[0], len(opac_names)))
         for idx, attr_name in enumerate(opac_names):
             opacities[:, idx] = np.asarray(plydata.elements[0][attr_name])
@@ -401,43 +513,41 @@ class GaussianModel:
             for name, _, lr in self.params
         }
     
-    def create_from_pcd(self, pcd : BasicPointCloud, training_args):
-        fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
+    def create_from_pcd(self, param_path=None, training_args=None):
         
-        xyz_min = fused_point_cloud.min(0).values
-        xyz_max = fused_point_cloud.max(0).values
+        plydata = PlyData.read(param_path)
+        vertices = plydata['vertex']
+        print(plydata.elements)
+        exit()
+        
+        xyz_min = means.min(0).values
+        xyz_max = means.max(0).values
         self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)
-    
-        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
-        features[:, :3, 0 ] = fused_color
-        features[:, 3:, 1:] = 0.0
 
-        dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
-
-        scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3) #* 0. + 0.1
-
-        rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
-        rots[:, 0] = 1
-
-        # Initialize opacities
-        opacities = 0.99 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
         
-        mean_foreground = fused_point_cloud.mean(dim=0).unsqueeze(0)
-        dist_foreground = torch.norm(fused_point_cloud - mean_foreground, dim=1)
+        mean_foreground = means.mean(dim=0).unsqueeze(0)
+        dist_foreground = torch.norm(means - mean_foreground, dim=1)
         self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()
         
-        print(f"Target lr scale: {self.spatial_lr_scale}")
-        self.active_sh_degree = 0
+        
+        means = checkpoint['_model.gauss_params.means']
+        scales = checkpoint['_model.gauss_params.scales']
+        opacities = checkpoint['_model.gauss_params.opacities']
+        rots = checkpoint['_model.gauss_params.quats']
+        sh0 = checkpoint['_model.gauss_params.features_dc']
+        shN = checkpoint['_model.gauss_params.features_rest']
+
+        print(f"Spatial lr scale: {self.spatial_lr_scale}")
+        self.active_sh_degree = 3
         
         params = {
             # 2DGS/3DGS Parameters
-            ("means", nn.Parameter(fused_point_cloud.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
+            ("means", nn.Parameter(means.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
             ("scales", nn.Parameter(scales.requires_grad_(True)), training_args.scaling_lr),
             ("quats", nn.Parameter(rots.requires_grad_(True)), training_args.rotation_lr),
             ("opacities", nn.Parameter(opacities.requires_grad_(True)), training_args.opacity_lr),
-            ("sh0", nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
-            ("shN", nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
+            ("sh0", nn.Parameter(sh0.unsqueeze(1).requires_grad_(True)), training_args.feature_lr),
+            ("shN", nn.Parameter(shN.requires_grad_(True)), training_args.feature_lr/20.),
             
         }
         self.splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to("cuda")
@@ -452,8 +562,7 @@ class GaussianModel:
             )
             for name, _, lr in params
         }
-        
-
+    
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight,
                            minview_weight):
         tvtotal = 0

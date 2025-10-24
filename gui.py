@@ -100,7 +100,7 @@ class GUI(GUIBase):
     def init_taining(self):
         # Set start and end of training
         if self.stage == 'coarse':
-            self.final_iter = 10
+            self.final_iter = self.opt.coarse_iterations
         else:
             self.final_iter = self.opt.iterations
             
@@ -137,6 +137,9 @@ class GUI(GUIBase):
                 self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                     num_workers=16, collate_fn=list))
 
+            self.filter_3D_stack = self.scene.mipsplatting_cameras
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+
     @property
     def get_batch_views(self): 
         try:
@@ -159,7 +162,7 @@ class GUI(GUIBase):
             viewpoint_cams, 
             self.gaussians,
         )
-
+        
         self.gaussians.pre_backward(self.iteration, info)
 
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
