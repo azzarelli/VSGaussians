@@ -11,8 +11,13 @@
 
 import torch
 
-def mse(img1, img2):
-    return (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
+def mse(img1, img2, per_image=False):
+    assert img1.shape == img2.shape, "Inputs must have the same shape"
+    diff = (img1 - img2) ** 2
+    if per_image and img1.ndim >= 4:
+        return diff.view(img1.shape[0], -1).mean(1, keepdim=True)
+    return diff.mean()
+
 @torch.no_grad()
 def psnr_(img1, img2, mask=None):
     img1 = img1.flatten(1)

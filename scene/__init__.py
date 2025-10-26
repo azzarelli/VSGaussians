@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, skip_coarse=None, max_frames=50, downsample=2):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, downsample=2):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -27,6 +27,7 @@ class Scene:
         self.loaded_iter = None
         self.gaussians = gaussians
         
+        # Select iteration to load if we are loading from a certain checkpoint
         if load_iteration:
             if load_iteration == -1:
                 self.loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"))
@@ -37,7 +38,6 @@ class Scene:
         max_frames = 100
         num_cams = 19
         dataset_type="nerfstudio"
-        # dataset_type="colmap"
 
         scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, downsample=downsample)
         
@@ -48,11 +48,7 @@ class Scene:
         
         self.train_camera = FourDGSdataset(scene_info.train_cameras, "train")
         self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
-                
-        self.canonical_camera = FourDGSdataset(scene_info.ba_cameras, "canon")
-        
-        self.mipsplatting_cameras = FourDGSdataset(scene_info.mip_splat_cams, "mipsplat")
-        
+                                
         self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
         
         self.ibl = IBLBackround(scene_info.background_pth_ids)

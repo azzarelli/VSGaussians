@@ -322,8 +322,8 @@ class GaussianModel:
             lr=0.0, eps=1e-15
         )
 
-        self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
-                                                    lr_final=training_args.position_lr_final*self.spatial_lr_scale,
+        self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init,
+                                                    lr_final=training_args.position_lr_final,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
         
@@ -498,13 +498,13 @@ class GaussianModel:
         
         mean_foreground = means.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(means - mean_foreground, dim=1)
-        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy() /5.
+        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy() /2.
 
         self.active_sh_degree = 3
         print(f"Spatial lr scale: {self.spatial_lr_scale}")
 
         self.params = {
-            ("means", nn.Parameter(means.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
+            ("means", nn.Parameter(means.requires_grad_(True)), training_args.position_lr_init ),
             ("scales", nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.scaling_lr),
             ("quats", nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.rotation_lr),
             ("opacities",nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.opacity_lr),
@@ -524,57 +524,7 @@ class GaussianModel:
             )
             for name, _, lr in self.params
         }
-    
-    def create_from_pcd(self, param_path=None, training_args=None):
-        
-        plydata = PlyData.read(param_path)
-        vertices = plydata['vertex']
-        print(plydata.elements)
-        exit()
-        
-        xyz_min = means.min(0).values
-        xyz_max = means.max(0).values
-        self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)
 
-        
-        mean_foreground = means.mean(dim=0).unsqueeze(0)
-        dist_foreground = torch.norm(means - mean_foreground, dim=1)
-        self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()
-        
-        
-        means = checkpoint['_model.gauss_params.means']
-        scales = checkpoint['_model.gauss_params.scales']
-        opacities = checkpoint['_model.gauss_params.opacities']
-        rots = checkpoint['_model.gauss_params.quats']
-        sh0 = checkpoint['_model.gauss_params.features_dc']
-        shN = checkpoint['_model.gauss_params.features_rest']
-
-        print(f"Spatial lr scale: {self.spatial_lr_scale}")
-        self.active_sh_degree = 3
-        
-        params = {
-            # 2DGS/3DGS Parameters
-            ("means", nn.Parameter(means.requires_grad_(True)), training_args.position_lr_init * self.spatial_lr_scale),
-            ("scales", nn.Parameter(scales.requires_grad_(True)), training_args.scaling_lr),
-            ("quats", nn.Parameter(rots.requires_grad_(True)), training_args.rotation_lr),
-            ("opacities", nn.Parameter(opacities.requires_grad_(True)), training_args.opacity_lr),
-            ("sh0", nn.Parameter(sh0.unsqueeze(1).requires_grad_(True)), training_args.feature_lr),
-            ("shN", nn.Parameter(shN.requires_grad_(True)), training_args.feature_lr/20.),
-            
-        }
-        self.splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to("cuda")
-
-        import math
-        batch_size = training_args.batch_size
-        self.gsplat_optimizers = {
-            name: torch.optim.Adam(
-                [{"params": self.splats[name], "lr": lr * math.sqrt(batch_size)}],
-                eps=1e-15 / math.sqrt(batch_size),
-                betas=(1 - batch_size * (1 - 0.9), 1 - batch_size * (1 - 0.999)),
-            )
-            for name, _, lr in params
-        }
-    
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight,
                            minview_weight):
         tvtotal = 0

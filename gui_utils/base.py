@@ -7,13 +7,15 @@ import torch
 from gaussian_renderer import render, render_triangles
 from tqdm import tqdm
 import time
+import json
+
 class GUIBase:
     """This method servers to intialize the DPG visualization (keeping my code cleeeean!)
     
         Notes:
             none yet...
     """
-    def __init__(self, gui, scene, gaussians, runname, view_test, bundle_adjust):
+    def __init__(self, gui, scene, gaussians, runname, view_test):
         
         self.gui = gui
         self.scene = scene
@@ -61,228 +63,7 @@ class GUIBase:
             dpg.create_context()
             self.register_dpg()
             
-        # if bundle_adjust and view_test == False:
-            # self.run_bundle_adjustment()
-            # self.init_optix()        
-            # self.test_optix()
-        
 
-    # def init_optix(self):
-    #     print('Running Optix Viewer Test...')
-    #     from gaussian_renderer.ray_tracer import OptixTriangles
-
-    #     self.optix_runner = OptixTriangles()
-        
-
-    def run_bundle_adjustment(self):
-        # Load DPG
-        print('Running Bundle Adjustment...')
-        dpg.create_context()
-        self.register_dpg()
-        
-        from dataprocess.utils.ray_tracer import TrainCam, TrainABC, SharedIntrinsics
-        import cv2
-
-        # Initialize the shared intrinsics
-        ba_cameras_flag = False
-
-        # Initialize dataset parameters for online image loading
-        self.scene.ba_camera.loading_flags["image"] = True
-        self.scene.ba_camera.loading_flags["glass"] = False
-        self.scene.ba_camera.loading_flags["scene_occluded"] = False
-        self.scene.ba_camera.loading_flags["scene"] = True
-
-        trainable_c2w = []
-        for cam in self.scene.ba_camera:
-            trainable_c2w.append(TrainCam(cam.world_view_transform.inverse().transpose(0,1)))
-
-        #####
-        # Approximate the corners of the IBL using the Mast3r approx point cloud
-        #####
-                
-        abcd = []
-        pcd = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
-        abcd = []
-        initialize_intrinsics = True
-        for cam in self.scene.ba_camera:
-            # Initilize the intrinsics using the first cam's parameters
-            if initialize_intrinsics:
-                trainable_intrinsics = SharedIntrinsics(
-                    cam.image_height, cam.image_width,
-                    cam.intrinsics
-                )
-                initialize_intrinsics=False
-
-                
-            masked_img = (~cam.scene_mask.bool()).squeeze(0).numpy().astype(np.uint8)
-            
-            # Solve the vertices of each image
-            contours, _ = cv2.findContours(masked_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cnt = max(contours, key=cv2.contourArea)
-            
-            peri = cv2.arcLength(cnt, True)
-            for eps in np.linspace(0.01, 0.1, 20):   # try different tolerances
-                approx = cv2.approxPolyDP(cnt, eps * peri, True)
-                if len(approx) == 4:
-                    pts = approx.reshape(4, 2)   # (x, y)
-                    break
-            else:    
-                raise RuntimeError("Could not approximate quadrilateral")
-                        
-            # Order the ABCD image vertices
-            s = pts.sum(axis=1)
-            diff = np.diff(pts, axis=1)
-            ordered = np.zeros((4,2), dtype="float32")
-            ordered[0] = pts[np.argmin(s)]       # top-left (min x+y)
-            ordered[2] = pts[np.argmax(s)]       # bottom-right (max x+y)
-            ordered[1] = pts[np.argmin(diff)]    # top-right (min x-y)
-            ordered[3] = pts[np.argmax(diff)]    # bottom-left (max x-y)
-            ordered = torch.from_numpy(ordered).int()
-            
-            ABCD = []
-            for (x,y) in ordered:
-                # x,y = int(x/2.5), int(y/2.5)
-                point = get_in_view_dyn_mask(cam, pcd, x,y)
-
-                ABCD.append(point.unsqueeze(0))
-            abcd.append(torch.cat(ABCD, dim=0).unsqueeze(0))
-        abcd = torch.cat(abcd, dim=0)[0]
-        
-        # TODO: load cam background image
-        background_texture = self.scene.ibl[0].cuda()
-        self.trainable_abc = TrainABC(abcd, background_texture.shape[1], background_texture.shape[2], background_texture=background_texture)
-
-        lr = 1e-2
-        intr_optim = torch.optim.Adam(trainable_intrinsics.parameters(), lr=lr)
-        cam_optims = [torch.optim.Adam(m.parameters(), lr=lr) for m in trainable_c2w]
-        suf_optim = torch.optim.Adam(self.trainable_abc.parameters(), lr=lr)
-
-        # Re-initialize dataset to get different masks:
-
-        TRAIN=True
-        if TRAIN:
-            self.stage = "ba"
-            max_iterations = 10
-            for iteration in range(max_iterations):
-                suf_optim.zero_grad()
-                if ba_cameras_flag:
-                    intr_optim.zero_grad()
-                    for opt in cam_optims:
-                        opt.zero_grad()
-                loss = 0.
-                
-                self.scene.ba_camera.loading_flags["image"] = True
-                self.scene.ba_camera.loading_flags["glass"] = False
-                self.scene.ba_camera.loading_flags["scene_occluded"] = True
-                self.scene.ba_camera.loading_flags["scene"] = False
-                for traincam, cam in zip(trainable_c2w, self.scene.ba_camera):
-                    
-                    if ba_cameras_flag:
-                        H,W, fx,fy,cx,cy = trainable_intrinsics()
-                        c2w = traincam()
-                    else:
-                        with torch.no_grad():
-                            H,W, fx,fy,cx,cy = trainable_intrinsics()
-                            c2w = traincam()
-
-                    abc = self.trainable_abc()
-                    
-                    origin,direction = cam.generate_rays(c2w, H, W, fx,fy,cx,cy)
-
-                    sampled = cam.surface_sample(origin, direction, abc, background_texture)
-                    
-                    mask = (1. - cam.sceneoccluded_mask.cuda()).bool().repeat(3,1,1)
-                    gt_img = mask * sampled #cam.image.cuda() 
-                    
-                    loss += ((gt_img - sampled)).abs().mean()*1.
-                    loss += (((cam.image.cuda()*mask) - sampled)).abs().mean()
-                
-                loss.backward()
-                suf_optim.step()
-                if ba_cameras_flag:
-                    intr_optim.step()
-                    for opt in cam_optims:
-                        opt.step()
-                
-                with torch.no_grad():
-                    if iteration % 2 == 0:
-                        self.viewer_step()
-                    dpg.set_value("_log_iter", f"Bundle Adjustment: {iteration} its")
-                    dpg.set_value("_log_loss", f"Loss: {loss.item()}")
-
-                    dpg.render_dearpygui_frame()
-
-        # Decompose the camera intrindixs to update the dataset
-        if ba_cameras_flag:               
-            _, _, fx,fy,cx,cy = trainable_intrinsics()
-            fx = fx.detach().cpu().item()
-            fy = fy.detach().cpu().item()
-            cx = cx.detach().cpu().item()
-            cy = cy.detach().cpu().item()
-        
-        from scene.dataset_readers import CameraInfo
-        new_training_data = []
-        cam_idxs = [i for j in range(self.scene.maxframes) for i in range(self.scene.num_cams)]
-        for idx, cam in enumerate(self.scene.train_camera):
-            if ba_cameras_flag:
-                c2w = trainable_c2w[cam_idxs[idx]]().detach().cpu().numpy()
-                w2c = np.linalg.inv(c2w)
-                # R = cam.R #w2c[:3, :3]
-                # T = cam.T #w2c[:3, 3]
-                R = w2c[:3, :3]
-                T = w2c[:3, 3]
-
-                new_training_data.append(CameraInfo(
-                    R=R, T=T,
-                    cx=cx, cy=cy, fx=fx, fy=fy,
-                    width=cam.width, height=cam.height,
-                    
-                    image_path=cam.image_path, 
-                    so_path=cam.so_path, s_path=cam.s_path, g_path=cam.g_path,b_path=cam.b_path,
-                    
-                    uid=cam.uid,
-                    time = cam.time, feature=cam.feature
-                ))
-            
-        self.current_cam_index = 0
-        self.scene.update_scene(self.trainable_abc(), new_training_data)
-        self.free_cams =  [self.scene.test_camera[0]] + [self.scene.ba_camera[idx] for idx in range(self.scene.num_cams)]
-
-        # Reset this to not confuse viewer on which abc to select
-        del self.trainable_abc
-        self.trainable_abc = None
-        
-        # Finally clean up the point cloud to remove screen-gaussians based on screne-occluded mask
-        pcd = torch.from_numpy(self.scene.point_cloud.points).cuda().float()
-        pcd_update_mask = None
-        for cam in self.scene.ba_camera:
-            
-            pcd_mask = remove_screen_points(cam, pcd)
-            pcd_update_mask = pcd_update_mask+pcd_mask if pcd_update_mask != None else pcd_mask
-
-        # pcd_update_mask = (pcd_update_mask == 0).int()
-        
-        pcd_update_mask = pcd_update_mask.cpu()
-        from utils.graphics_utils import BasicPointCloud
-        if self.scene.loaded_iter == None:
-            self.scene.point_cloud = BasicPointCloud(
-                points  = torch.from_numpy(self.scene.point_cloud.points)[pcd_update_mask].numpy(),
-                colors  = torch.from_numpy(self.scene.point_cloud.colors)[pcd_update_mask].numpy(),
-                normals = torch.from_numpy(self.scene.point_cloud.normals)[pcd_update_mask].numpy()
-            )
-            self.scene.gaussians.create_from_pcd(self.scene.point_cloud, self.opt) # TODO: configure
-        self.stage = "coarse"
-        
-        
-        # Display 
-        DEBUG = False
-        if DEBUG:
-            while dpg.is_dearpygui_running():
-                with torch.no_grad():
-                    self.viewer_step()                    
-                    dpg.render_dearpygui_frame()
-            exit()
-        
     def __del__(self):
         dpg.destroy_context()
 
@@ -298,7 +79,6 @@ class GUIBase:
             f'[{self.stage} {self.iteration}] Time: {time:.2f} | Allocated Memory: {allocated:.2f} MB, Reserved Memory: {reserved:.2f} MB | CPU Memory Usage: {memory_mb:.2f} MB')
     
     def render(self):
-        tested = True
 
         while dpg.is_dearpygui_running():
             if self.view_test == False:
@@ -315,20 +95,12 @@ class GUIBase:
                     self.iter_start.record()
                     
                     # Depending on stage process a training step
-                    if self.stage == 'coarse':
-                        self.iteration = self.final_iter
-                        self.canonical_train_step(viewpoint_cams)
-                    else:
-                        self.train_step(viewpoint_cams)
+                    self.train_step(viewpoint_cams)
 
                     self.iter_end.record()
                 
                 else: # Initialize fine from coarse stage
-                    if self.stage == 'coarse':
-                        self.stage = 'fine'
-                        self.init_taining()
-                    
-                    else: # Stop trainnig once fine training is done
+                    if self.stage == 'fine':
                         self.stage = 'done'
                         dpg.stop_dearpygui()
                         
@@ -339,23 +111,66 @@ class GUIBase:
 
                 
                 # Test Step
-                if self.iteration % 2000 == 0:
-                    PSNR = 0.
-                    test_size  = len(self.scene.test_camera)
-                    for i, test_cam in enumerate(self.scene.test_camera):
-                        psnr = self.test_step(test_cam)
-                        PSNR+= psnr
-                        dpg.set_value("_log_test_progress", f"Progress: {int(100*(i/test_size))}%")
-                        dpg.set_value("_log_psnr_test", f"PSNR: {PSNR.item()}")
-                        dpg.render_dearpygui_frame()    
+                if self.iteration % self.test_every == 0:
+                    metrics = {
+                        "mse":0.,
+                        "psnr":0.,
+                        "ssim":0.
+                    }
+                    
+                    datasets = {
+                        "L":metrics.copy(),
+                        "V":metrics.copy(),
+                        "LV":metrics.copy(),
+                    }
+                    test_size = len(self.scene.test_camera)
+                    dataset_idxs = self.scene.test_camera.subset_idxs
 
-                    PSNR = PSNR / test_size
-                    dpg.set_value("_log_psnr_test", f"PSNR: {psnr}")
-                    dpg.set_value("_log_test_progress", f"Progress: 0%")
+                    for i, test_cam in enumerate(self.scene.test_camera):
+                        metric_results = self.test_step(test_cam)
+                        
+                        if i < dataset_idxs[0]: # L-only tests
+                            d_type = "L"
+                        elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                            d_type = "V"
+                        else:
+                            d_type = "LV"
+                            
+                        for key in metrics.keys():
+                            datasets[d_type][key] += metric_results[key].item()
+                        
+                        dpg.set_value("_log_test_progress", f"{int(100*(i/test_size))}% | {metric_results['psnr']:.2f} on {d_type} type")
+                        dpg.render_dearpygui_frame()
+
+                    # Average
+                    for key, lengths in zip(datasets.keys(), dataset_idxs):
+                        for key_1 in metrics.keys():
+                            datasets[key][key_1] /= lengths
+
+                    # Logs with 3 decimal places
+                    dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
+                    dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
+                    dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
+
+                    dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
+                    dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
+                    dpg.set_value("_log_v_3", f"psnr : {datasets['V']['psnr']:.2f}")
+
+                    dpg.set_value("_log_lv_1", f"mse  : {datasets['LV']['mse']:.3f}")
+                    dpg.set_value("_log_lv_2", f"ssim : {datasets['LV']['ssim']:.3f}")
+                    dpg.set_value("_log_lv_3", f"psnr : {datasets['LV']['psnr']:.2f}")
+                    dpg.set_value("_log_test_progress", f"Saving json ...")
                     dpg.render_dearpygui_frame()
                     
-                                
-                
+                    test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
+                    with open(test_fp, "w") as outfile:
+                        json.dump(datasets, outfile, indent=4, ensure_ascii=False)
+                        
+                        
+                    dpg.set_value("_log_test_progress", f"...(training)...")
+                    dpg.render_dearpygui_frame()
+                    
+                    
                 # Update iteration
                 self.iteration += 1
 
@@ -521,32 +336,46 @@ class GUIBase:
             # timer stuff
             with dpg.group(horizontal=True):
                 dpg.add_text("Infer time: ")
-                dpg.add_text("no data", tag="_log_infer_time")
+                dpg.add_text("N/A", tag="_log_infer_time")
             with dpg.group(horizontal=True):
                 dpg.add_text("Stage: ")
-                dpg.add_text("no data", tag="_log_stage")
+                dpg.add_text("N/A", tag="_log_stage")
             # ----------------
             #  Loss Functions
             # ----------------
             with dpg.group():
                 if self.view_test is False:
                     dpg.add_text("Training info:")
-                    dpg.add_text("no data", tag="_log_iter")
-                    dpg.add_text("no data", tag="_log_relit")
-                    dpg.add_text("no data", tag="_log_canon")
-                    dpg.add_text("no data", tag="_log_deform")
-                    dpg.add_text("no data", tag="_log_plane")
-                    dpg.add_text("no data", tag="_log_fine2")
+                    dpg.add_text("N/A", tag="_log_iter")
+                    dpg.add_text("N/A", tag="_log_relit")
+                    dpg.add_text("N/A", tag="_log_canon")
+                    dpg.add_text("N/A", tag="_log_deform")
+                    dpg.add_text("N/A", tag="_log_plane")
+                    dpg.add_text("N/A", tag="_log_fine2")
 
-                    dpg.add_text("no data", tag="_log_points")
+                    dpg.add_text("N/A", tag="_log_points")
                 else:
                     dpg.add_text("Training info: (Not training)")
 
 
             with dpg.collapsing_header(label="Testing info:", default_open=True):
-                dpg.add_text("no data", tag="_log_test_progress")
-                dpg.add_text("no data", tag="_log_psnr_test")
-                dpg.add_text("no data", tag="_log_ssim")
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Progress : ")
+                    dpg.add_text("N/A", tag="_log_test_progress")
+
+                dpg.add_text("Lighting-only : ")
+                dpg.add_text("N/A", tag="_log_l_1")
+                dpg.add_text("N/A", tag="_log_l_2")
+                dpg.add_text("N/A", tag="_log_l_3")
+                dpg.add_text("View-only : ")
+                dpg.add_text("N/A", tag="_log_v_1")
+                dpg.add_text("N/A", tag="_log_v_2")
+                dpg.add_text("N/A", tag="_log_v_3")
+                dpg.add_text("View & Lighting : ")
+                dpg.add_text("N/A", tag="_log_lv_1")
+                dpg.add_text("N/A", tag="_log_lv_2")
+                dpg.add_text("N/A", tag="_log_lv_3")
+                    
 
             # ----------------
             #  Control Functions
@@ -573,7 +402,7 @@ class GUIBase:
                     
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Reset cam", callback=callback_toggle_reset_cam)
-                    dpg.add_text("no data", tag="_log_view_camera")
+                    dpg.add_text("N/A", tag="_log_view_camera")
                     dpg.add_button(label="Next cam", callback=callback_toggle_next_cam)
 
                 def callback_toggle_reset_cam(sender):

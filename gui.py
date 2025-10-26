@@ -14,11 +14,9 @@ from arguments import ModelParams, PipelineParams, OptimizationParams, ModelHidd
 from torch.utils.data import DataLoader
 from utils.timer import Timer
 
-from utils.loss_utils import l1_loss
-from utils.image_utils import psnr
+from utils.loss_utils import l1_loss, ssim
+from utils.image_utils import psnr, mse
 from gaussian_renderer import render, render_extended,render_canonical
-
-from torch.cuda.amp import autocast, GradScaler
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 import matplotlib.pyplot as plt
@@ -36,30 +34,28 @@ class GUI(GUIBase):
                  ckpt_start,
                  debug_from,
                  expname,
-                 skip_coarse,
                  view_test,
-                 bundle_adjust,
                  use_gui:bool=False,
-                 downsample:int=2
                  ):
-
-        self.skip_coarse = None
-        self.stage = 'coarse'
-
+        self.stage = 'fine'
         expname = 'output/'+expname
         self.expname = expname
         self.opt = opt
         self.pipe = pipe
         self.dataset = dataset
         self.dataset.model_path = expname
+        self.statistics_path = os.path.join(expname, 'statistics')
+        if os.path.exists(self.statistics_path) == False:
+            os.mkdir(self.statistics_path)
+
         self.hyperparams = hyperparams
         self.args = args
         self.args.model_path = expname
         self.saving_iterations = saving_iterations
+        self.test_every = testing_iterations
+        
         self.checkpoint = ckpt_start
         self.debug_from = debug_from
-
-        self.total_frames = 300
         
         self.results_dir = os.path.join(self.args.model_path, 'active_results')
         if ckpt_start is None:
@@ -77,40 +73,29 @@ class GUI(GUIBase):
         # Set the gaussian mdel and scene
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None:
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start, downsample=downsample)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start)
         else:
-            if skip_coarse:
-                gaussians.active_sh_degree = dataset.sh_degree
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, skip_coarse=self.skip_coarse, downsample=downsample)
-        
-        self.total_frames = scene.maxframes
-        # Initialize DPG      
-        super().__init__(use_gui, scene, gaussians, self.expname, view_test, bundle_adjust)
 
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config)
         
+        # Initialize DPG      
+        super().__init__(use_gui, scene, gaussians, self.expname, view_test)
+
         # Initialize training
         self.timer = Timer()
         self.timer.start()
         self.init_taining()
         
-        if skip_coarse:
-            self.iteration = 1
-        if ckpt_start: self.iteration = int(self.scene.loaded_iter) + 1
+        if ckpt_start: 
+            self.iteration = int(self.scene.loaded_iter) + 1
          
     def init_taining(self):
         # Set start and end of training
-        if self.stage == 'coarse':
-            self.final_iter = self.opt.coarse_iterations
-        else:
-            self.final_iter = self.opt.iterations
+        self.final_iter = self.opt.iterations
             
         first_iter = 1
 
-        # Set up gaussian training
-        if self.stage == 'coarse':
-            self.gaussians.training_canonical_setup(self.opt)
-        else:
-            self.gaussians.training_setup(self.opt)
+        self.gaussians.training_setup(self.opt)
 
         if self.checkpoint:
             (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_{self.checkpoint}.pth')
@@ -125,20 +110,11 @@ class GUI(GUIBase):
         
         if self.view_test == False:
             self.random_loader  = True
-
-            if self.stage == 'coarse':
-                print('Loading canonical dataset..')
-                self.viewpoint_stack = self.scene.canonical_camera
-                self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                    num_workers=16, collate_fn=list))
-            else:
-                print('Loading dataset..')
-                self.viewpoint_stack = self.scene.train_camera
-                self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                    num_workers=16, collate_fn=list))
-
-            self.filter_3D_stack = self.scene.mipsplatting_cameras
-            # self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+            
+            print('Loading dataset..')
+            self.viewpoint_stack = self.scene.train_camera
+            self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                num_workers=16, collate_fn=list))
 
     @property
     def get_batch_views(self): 
@@ -221,12 +197,12 @@ class GUI(GUIBase):
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         
-        canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
+        # canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
 
         # Loss Functions
         deform_loss = l1_loss(render, render_gt* masked_gt)
-        canon_loss = l1_loss(canon, canons_gt* masked_gt)
-        
+        # canon_loss = l1_loss(canon, canons_gt* masked_gt)
+        canon_loss = 0.
         planeloss = self.gaussians.compute_regulation(
             self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
             self.hyperparams.minview_weight
@@ -240,7 +216,7 @@ class GUI(GUIBase):
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     
                     dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                    dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
+                    # dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
                     
                     dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
@@ -271,11 +247,19 @@ class GUI(GUIBase):
             self.gaussians,
             [texture],
         )
+        
+        relit = relit.squeeze(0)
 
         mask = viewpoint_cams.sceneoccluded_mask.cuda()
-
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
-        return psnr(relit, gt_img* mask)
+        
+        gt_out = gt_img * mask
+
+        return {
+            "mse":mse(relit, gt_out),
+            "psnr":psnr(relit, gt_out),
+            "ssim":ssim(relit, gt_out)
+        }
 
 
 def setup_seed(seed):
@@ -300,18 +284,15 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", type=int, default=4000)
-    parser.add_argument("--downsample", type=int, default=2)
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[8000, 15999, 20000, 30_000, 45000, 60000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "")
     parser.add_argument("--configs", type=str, default = "")
-    parser.add_argument('--skip-coarse', type=str, default = None)
     parser.add_argument('--view-test', action='store_true', default=False)
     
-    parser.add_argument('--bundle-adjust', action='store_true', default=False)
-
     parser.add_argument("--cam-config", type=str, default = "4")
+    parser.add_argument("--downsample", type=int, default=1)
     
     
     args = parser.parse_args(sys.argv[1:])
@@ -342,12 +323,9 @@ if __name__ == "__main__":
         ckpt_start=args.start_checkpoint, 
         debug_from=args.debug_from, 
         expname=name,
-        skip_coarse=args.skip_coarse,
         view_test=args.view_test,
-        bundle_adjust=args.bundle_adjust,
 
         use_gui=True,
-        downsample=args.downsample
     )
     gui.render()
     del gui

@@ -42,8 +42,6 @@ class CameraInfo(NamedTuple):
 class SceneInfo(NamedTuple):
     train_cameras: list
     test_cameras:list
-    ba_cameras:list
-    mip_splat_cams:list
     video_cameras: list
     nerf_normalization: dict
     background_pth_ids:list
@@ -453,34 +451,29 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     print("Reading nerfstudio data ...")
     # Read camera transforms    
     canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
-    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos)
+    
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos) # L is the number of background paths
     
     # split into training and test dataset
-    test_idx_set = [i for i in range(10)]
-    test_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) in test_idx_set]
-    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in test_idx_set]
+    V_cam = 14
+    L_test_idx_set = [8, 12, 27, 36, 48, 55, 61, 71, 81, 98] # The lighting-only test set
+    V_test_idx_set = [(V_cam*100)+i for i in range(100) if i not in L_test_idx_set] # The novel-view only test set
+    LV_test_idx_set = [(V_cam*100)+i for i in range(100) if i in L_test_idx_set] # The novel-view & novel lighting test set
     
-    # generate mipsplatting confid data
-    M = N - len(test_idx_set)
-    mip_splat_cams = [cam for i, cam in enumerate(relighting_cams) if i%M == 0]
+    L_test_cams = [cam for idx, cam in enumerate(cam_infos)  if (idx % L) in L_test_idx_set and idx not in LV_test_idx_set] # For indexs n the lighting test set
+    V_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in V_test_idx_set] # For indexs in the novel view test set
+    LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
+    test_cams = [L_test_cams, V_test_cams, LV_test_cams]
     
+    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
+        
     nerf_normalization = getNerfppNorm(relighting_cams)
     
-    
-    # Get sparse colmap point cloud
-    # ply_path = os.path.join(path, "sparse_pc.ply")
-    # pcd = fetchPly(ply_path)
-    # splat_path = os.path.join(path, "splat/splat.ply")
-    # plydata = PlyData.read(splat_path)
-
     
     scene_info = SceneInfo(
         train_cameras=relighting_cams,
         test_cameras=test_cams,
         video_cameras=canon_cam_infos,
-        mip_splat_cams=mip_splat_cams,
-        
-        ba_cameras=canon_cam_infos,
         
         nerf_normalization=nerf_normalization,
         background_pth_ids=background_paths,

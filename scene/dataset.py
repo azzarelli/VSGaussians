@@ -9,35 +9,42 @@ class FourDGSdataset(Dataset):
         dataset,
         dataset_type,
     ):
-        self.dataset = dataset
+        if dataset_type == 'train':
+            self.dataset = dataset
+            self.subset_dict = None
+        elif dataset_type == 'test':
+            self.dataset = dataset[0] + dataset[1] + dataset[2]
+            self.subset_idxs = [len(dataset[0]), len(dataset[1]), len(dataset[2])] # Also the starting index of the following dataset-subset
+        
         self.dataset_type = dataset_type
         
         self.loading_flags = {
-            "image":True if dataset_type != 'mipsplat' else False,
-            "canon":True if dataset_type in ['train'] else False,
-            "scene_occluded":True if dataset_type in ['train', 'test']  else False,
+            "image":True,
+            "canon":False,
+            "scene_occluded":True,
             "differences":False,
         }
         
     def __getitem__(self, index):
-        
+        dataset = self.dataset
+            
         cam = Camera(
-            R=self.dataset[index].R, T=self.dataset[index].T,
-            fx=self.dataset[index].fx, fy=self.dataset[index].fy,
-            cx=self.dataset[index].cx, cy=self.dataset[index].cy,
-            k1=self.dataset[index].k1, k2=self.dataset[index].k2,
-            p1=self.dataset[index].p1, p2=self.dataset[index].p2,
+            R=dataset[index].R, T=dataset[index].T,
+            fx=dataset[index].fx, fy=dataset[index].fy,
+            cx=dataset[index].cx, cy=dataset[index].cy,
+            k1=dataset[index].k1, k2=dataset[index].k2,
+            p1=dataset[index].p1, p2=dataset[index].p2,
             
-            width=self.dataset[index].width, height=self.dataset[index].height,
+            width=dataset[index].width, height=dataset[index].height,
 
-            time=self.dataset[index].time,
+            time=dataset[index].time,
 
-            image_path=self.dataset[index].image_path,
-            sceneoccluded_path=self.dataset[index].so_path,
-            diff_path=self.dataset[index].diff_path,
-            canon_path=self.dataset[index].canon_path,
+            image_path=dataset[index].image_path,
+            sceneoccluded_path=dataset[index].so_path,
+            diff_path=dataset[index].diff_path,
+            canon_path=dataset[index].canon_path,
             
-            uid=self.dataset[index].uid,
+            uid=dataset[index].uid,
             data_device=torch.device("cuda"), 
         )
         
