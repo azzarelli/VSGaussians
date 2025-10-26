@@ -5,6 +5,7 @@ import numpy as np
 import random
 import os, sys
 import torch
+import torchvision.utils as vutils
 
 import sys
 from scene import Scene, GaussianModel
@@ -45,8 +46,8 @@ class GUI(GUIBase):
         self.dataset = dataset
         self.dataset.model_path = expname
         self.statistics_path = os.path.join(expname, 'statistics')
-        if os.path.exists(self.statistics_path) == False:
-            os.mkdir(self.statistics_path)
+        self.save_tests = os.path.join(expname, 'tests')
+        
 
         self.hyperparams = hyperparams
         self.args = args
@@ -64,7 +65,12 @@ class GUI(GUIBase):
             if os.path.exists(self.results_dir):
                 print(f'[Removing old results] : {self.results_dir}')
                 shutil.rmtree(self.results_dir)
-            os.mkdir(self.results_dir)    
+            os.mkdir(self.results_dir)
+            
+        if os.path.exists(self.statistics_path) == False:
+            os.makedirs(self.statistics_path)
+        if os.path.exists(self.save_tests) == False:
+            os.makedirs(self.save_tests)
             
         # Set the background color
         bg_color = [1, 1, 1] if self.dataset.white_background else [0, 0, 0]
@@ -126,40 +132,6 @@ class GUI(GUIBase):
             self.loader = iter(viewpoint_stack_loader)
             viewpoint_cams = next(self.loader)
         return viewpoint_cams
-
-    
-    def canonical_train_step(self, viewpoint_cams):
-        """Training Canonical Space (DenserGeometry Learning)
-        """
-        
-        self.gaussians.pre_train_step(self.iteration, self.opt.iterations, 'coarse')
-        
-        render, info = render_canonical(
-            viewpoint_cams, 
-            self.gaussians,
-        )
-        
-        self.gaussians.pre_backward(self.iteration, info)
-
-        render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-
-        loss = l1_loss(render, render_gt)
-       
-        with torch.no_grad():
-            if self.gui:
-                    dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    dpg.set_value("_log_canon", f"Canon Loss: {loss.item()}")
-                    dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
-            
-            # Error if loss becomes nan
-            if torch.isnan(loss).any():
-                print("loss is nan, end training, reexecv program now.")
-                os.execv(sys.executable, [sys.executable] + sys.argv)
-                
-        # Backpass
-        loss.backward()
-
-        self.gaussians.post_backward(self.iteration, info, 'coarse')
 
 
     def train_step(self, viewpoint_cams):
@@ -234,26 +206,28 @@ class GUI(GUIBase):
         self.gaussians.post_backward(self.iteration, info, 'fine')
 
     @torch.no_grad
-    def test_step(self, viewpoint_cams):
-        """Dine/Deformation Testing
-        """
-
+    def test_step(self, viewpoint_cams, index, d_type):
         # Sample the background image
         id1 = int(viewpoint_cams.time*self.scene.maxframes)
         texture = self.scene.ibl[id1].cuda()
-        
+        # Rendering pass
         relit, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
         )
         
+        # Process data
         relit = relit.squeeze(0)
 
         mask = viewpoint_cams.sceneoccluded_mask.cuda()
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
         
         gt_out = gt_img * mask
+        
+        # Save image
+        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
+            vutils.save_image(relit, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
 
         return {
             "mse":mse(relit, gt_out),

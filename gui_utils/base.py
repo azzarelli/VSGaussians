@@ -127,14 +127,15 @@ class GUIBase:
                     dataset_idxs = self.scene.test_camera.subset_idxs
 
                     for i, test_cam in enumerate(self.scene.test_camera):
-                        metric_results = self.test_step(test_cam)
-                        
                         if i < dataset_idxs[0]: # L-only tests
                             d_type = "L"
                         elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
                             d_type = "V"
                         else:
                             d_type = "LV"
+                            
+                        metric_results = self.test_step(test_cam, i, d_type)
+                    
                             
                         for key in metrics.keys():
                             datasets[d_type][key] += metric_results[key].item()
