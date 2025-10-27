@@ -213,7 +213,7 @@ class GUIBase:
             if self.trainable_abc is None:
                 abc = self.scene.ibl.abc.cuda()
                 
-                id1 = int(self.time*100)
+                id1 = int(self.time*99)
                 texture = self.scene.ibl[id1].cuda()
 
             else:

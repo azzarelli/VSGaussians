@@ -162,11 +162,11 @@ class GUI(GUIBase):
             id1 = int(cam.time*self.scene.maxframes)
             textures.append(self.scene.ibl[id1])
         
-        render, canon, info = render_extended(
+        render, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
-            return_canon=True
+            return_canon=False
         )
 
         self.gaussians.pre_backward(self.iteration, info)
@@ -178,14 +178,8 @@ class GUI(GUIBase):
 
         # Loss Functions
         deform_loss = l1_loss(render, render_gt* masked_gt)
-        # canon_loss = l1_loss(canon, canons_gt* masked_gt)
-        canon_loss = 0.
-        planeloss = self.gaussians.compute_regulation(
-            self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
-            self.hyperparams.minview_weight
-        )
         
-        loss = deform_loss + canon_loss + planeloss #+ 0.01* diff_loss
+        loss = deform_loss #+ 0.01* diff_loss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
@@ -194,8 +188,6 @@ class GUI(GUIBase):
                     
                     dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                     # dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
-                    
-                    dpg.set_value("_log_plane", f"Planes Loss: {planeloss.item()}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
@@ -243,8 +235,7 @@ class GUI(GUIBase):
     @torch.no_grad
     def video_step(self, viewpoint_cams, index):
         # Sample the background image
-        id1 = int(viewpoint_cams.time*self.scene.maxframes)
-        texture = self.scene.ibl[id1].cuda()
+        texture = self.scene.ibl[index%99].cuda()
         # Rendering pass
         _, relit, _ = render_extended(
             [viewpoint_cams], 

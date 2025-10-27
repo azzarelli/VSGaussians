@@ -25,10 +25,9 @@ def process_Gaussians_triplane(pc):
     # Use existing function for processing canon
     means3D, rotations, opacity, colors, scales = process_Gaussians(pc)
     
-    # Sample color deformation
-    texsample, texscale, invariance = pc._deformation(
-        point=means3D,
-    )
+    invariance = pc.get_lambda
+    texsample = pc.get_ab
+    texscale = pc.get_texscale
         
     return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
 
@@ -240,6 +239,10 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
+            shs_view = invariance.transpose(1, 2).view(-1, 1, 16)
+            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+            invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
+            
         active_sh = pc.active_sh_degree
         # Set arguments depending on type of viewing
         if view_args['vis_mode'] in 'render':
@@ -290,10 +293,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] == 'invariance':
-            try: 
-                render = render.squeeze(0).permute(2,0,1)
-            except:
-                render = render.squeeze(-1).repeat(3,1,1)
+            render = render.squeeze(-1).repeat(3,1,1)
             
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
@@ -350,21 +350,23 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
     # Precompute point a,b,s texture indexing
     colors_final = []
     for texture, cam in zip(textures, viewpoint_camera):
-        shs_view = colors.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
         dir_pp = (means3D - cam.camera_center.cuda().repeat(colors.shape[0], 1))
         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+        
+        shs_view = colors.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
 
         shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
-        dir_pp = (means3D - cam.camera_center.cuda().repeat(texsample.shape[0], 1))
-        dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
+        shs_view = invariance.transpose(1, 2).view(-1, 1, 16)
+        sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+        tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
         colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=2)
-        colors_final.append((invariance*colors_precomp + (1.-invariance)*colors_ibl).unsqueeze(0))
+        colors_final.append((tex_invariance*colors_precomp + (1.-tex_invariance)*colors_ibl).unsqueeze(0))
 
     colors_final = torch.cat(colors_final, dim=0)
     M = len(textures)
