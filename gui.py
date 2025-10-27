@@ -45,8 +45,11 @@ class GUI(GUIBase):
         self.pipe = pipe
         self.dataset = dataset
         self.dataset.model_path = expname
+        
+        # Metrics, Test images and Video Renders folders
         self.statistics_path = os.path.join(expname, 'statistics')
         self.save_tests = os.path.join(expname, 'tests')
+        self.save_videos = os.path.join(expname, 'videos')
         
 
         self.hyperparams = hyperparams
@@ -71,6 +74,8 @@ class GUI(GUIBase):
             os.makedirs(self.statistics_path)
         if os.path.exists(self.save_tests) == False:
             os.makedirs(self.save_tests)
+        if os.path.exists(self.save_videos) == False:
+            os.makedirs(self.save_videos)
             
         # Set the background color
         bg_color = [1, 1, 1] if self.dataset.white_background else [0, 0, 0]
@@ -234,6 +239,23 @@ class GUI(GUIBase):
             "psnr":psnr(relit, gt_out),
             "ssim":ssim(relit, gt_out)
         }
+        
+    @torch.no_grad
+    def video_step(self, viewpoint_cams, index):
+        # Sample the background image
+        id1 = int(viewpoint_cams.time*self.scene.maxframes)
+        texture = self.scene.ibl[id1].cuda()
+        # Rendering pass
+        _, relit, _ = render_extended(
+            [viewpoint_cams], 
+            self.gaussians,
+            [texture],return_canon=True
+        )
+        
+        # Process data
+        relit = relit.squeeze(0)
+        
+        vutils.save_image(relit, os.path.join(self.save_videos, f"{index:05}.jpg"))
 
 
 def setup_seed(seed):

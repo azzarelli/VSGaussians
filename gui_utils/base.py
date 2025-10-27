@@ -102,12 +102,19 @@ class GUIBase:
                 else: # Initialize fine from coarse stage
                     if self.stage == 'fine':
                         self.stage = 'done'
+                        view_size=len(self.scene.video_camera)
+                        for i, test_cam in enumerate(self.scene.video_camera):
+                            metric_results = self.video_step(test_cam, i)
+
+                            dpg.set_value("_log_test_progress", f"{int(100*(i/view_size))}% | novel view video")
+                            dpg.render_dearpygui_frame()
+
                         dpg.stop_dearpygui()
                         
-                xyz_end = self.gaussians.get_xyz.shape[0]
+                # xyz_end = self.gaussians.get_xyz.shape[0]
                 
-                if xyz_start != xyz_end or self.iteration % 500 == 0:
-                    self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+                # if xyz_start != xyz_end or self.iteration % 500 == 0:
+                #     self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
 
                 
                 # Test Step
@@ -263,8 +270,6 @@ class GUIBase:
                 .numpy()
             )
 
-
-
         t1 = time.time()
         
         buffer_image = self.buffer_image
@@ -285,8 +290,6 @@ class GUIBase:
         torch.save((self.gaussians.capture(), self.iteration), self.scene.model_path + "/chkpnt" + f"_" + str(self.iteration) + ".pth")
 
     def register_dpg(self):
-        
-        
         ### register texture
         with dpg.texture_registry(show=False):
             dpg.add_raw_texture(

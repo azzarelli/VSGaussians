@@ -9,7 +9,7 @@ class FourDGSdataset(Dataset):
         dataset,
         dataset_type,
     ):
-        if dataset_type == 'train':
+        if dataset_type in ['train', 'video']:
             self.dataset = dataset
             self.subset_dict = None
         elif dataset_type == 'test':
@@ -19,9 +19,9 @@ class FourDGSdataset(Dataset):
         self.dataset_type = dataset_type
         
         self.loading_flags = {
-            "image":True,
+            "image":True if dataset_type not in ['video'] else False,
             "canon":False,
-            "scene_occluded":True,
+            "scene_occluded":True if dataset_type not in ['video'] else False,
             "differences":False,
         }
         

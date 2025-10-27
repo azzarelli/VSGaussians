@@ -445,6 +445,57 @@ def readCamerasFromCanon(path, canon_cams, M=19):
 
     return relit_cams, background_im_paths, L
 
+import math
+def generate_circular_cams(
+    path,
+    cam,
+):
+    """
+    Generate a circular camera path (all c2w) around a fixed point in front
+    of the input camera, keeping orientation toward that point.
+    Assumes OpenCV-style camera with forward = -Z in c2w.
+    """
+
+    # --- extract camera basis (columns of R are world-space camera axes)
+    fp = os.path.join(path, 'meta/video_paths.json')
+    with open(fp, "r") as json_file:
+        contents = json.load(json_file)
+
+    zoomscale = 0.65
+    # --- recompute fx, fy from that new FOV
+    fx_new = cam.fx*zoomscale
+    fy_new = cam.fy*zoomscale
+    cams=[]
+    for info in contents['camera_path']:
+        #
+        c2w = np.array(info["camera_to_world"], dtype=np.float32).reshape(4, 4)
+
+        R = c2w[:3, :3]
+        T = c2w[:3, 3]
+
+        cam_info = CameraInfo(
+                    uid=cam.uid, 
+                    R=R, T=T,
+                    
+                    fx=fx_new,
+                    fy=fy_new,
+                    cx=cam.cx, cy=cam.cy,
+                    k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
+
+                    width=cam.width, height=cam.height,
+
+                    image_path=None, 
+                    canon_path=None,
+                    so_path=None,
+                    b_path=None,
+                    diff_path = None,
+                    time=cam.time,
+                    feature=None, 
+                )
+        
+        cams.append(cam_info)
+    return cams
+
 def readNerfstudioInfo(path, N=98, downsample=2):
     """Construct dataset from nerfstudio
     """
@@ -466,14 +517,17 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     test_cams = [L_test_cams, V_test_cams, LV_test_cams]
     
     relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
-        
+    
+    video_cams = generate_circular_cams(path, cam_infos[V_cam*100])
+    
+    
     nerf_normalization = getNerfppNorm(relighting_cams)
     
     
     scene_info = SceneInfo(
         train_cameras=relighting_cams,
         test_cameras=test_cams,
-        video_cameras=canon_cam_infos,
+        video_cameras=video_cams,
         
         nerf_normalization=nerf_normalization,
         background_pth_ids=background_paths,

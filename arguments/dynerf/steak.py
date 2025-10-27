@@ -19,8 +19,7 @@ OptimizationParams = dict(
     batch_size=2, # Was 4
 
     dataloader=True,
-    iterations=16000, # 7000 salmon with 4 batch, 8000 with flame steak
-    coarse_iterations=9000,
+    iterations=1, # 7000 salmon with 4 batch, 8000 with flame steak
     
     lambda_dssim = 0.2,
     lambda_dist = 0.0,

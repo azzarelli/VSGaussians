@@ -49,7 +49,7 @@ class Scene:
         self.train_camera = FourDGSdataset(scene_info.train_cameras, "train")
         self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
                                 
-        self.video_cameras = FourDGSdataset(scene_info.video_cameras, dataset_type)
+        self.video_camera = FourDGSdataset(scene_info.video_cameras, "video")
         
         self.ibl = IBLBackround(scene_info.background_pth_ids)
                 

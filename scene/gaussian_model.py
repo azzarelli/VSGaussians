@@ -75,8 +75,7 @@ class GaussianModel:
             self.splats,
             self.hex_optimizer.state_dict(),
             self.spatial_lr_scale,
-            self.spatial_lr_scale_background,
-            self.filter_3D
+            self.spatial_lr_scale_background
         )
 
     def restore(self, model_args, training_args):
@@ -84,7 +83,7 @@ class GaussianModel:
         deform_state,
         self.splats,
         opt_dict,
-        self.spatial_lr_scale,self.spatial_lr_scale_background,self.filter_3D) = model_args
+        self.spatial_lr_scale,self.spatial_lr_scale_background) = model_args
         
         self._deformation.load_state_dict(deform_state)
         self.training_setup(training_args)
@@ -135,7 +134,7 @@ class GaussianModel:
         distance[~valid_points] = distance[valid_points].max()
         #TODO box to gaussian transform
         filter_3D = distance / focal_length * (0.2 ** 0.5)
-        self.filter_3D = filter_3D[..., None]
+        # self.filter_3D = filter_3D[..., None]
 
     @property
     def get_features(self):
@@ -147,13 +146,13 @@ class GaussianModel:
     def get_scaling(self):
         return self.scaling_activation(self.splats["scales"])
     
-    @property
-    def get_scaling_with_3D_filter(self):
-        scales = self.get_scaling
+    # @property
+    # def get_scaling_with_3D_filter(self):
+    #     scales = self.get_scaling
         
-        scales = torch.square(scales) + torch.square(self.filter_3D)
-        scales = torch.sqrt(scales)
-        return scales
+    #     scales = torch.square(scales) + torch.square(self.filter_3D)
+    #     scales = torch.sqrt(scales)
+    #     return scales
     
     @property
     def get_rotation(self):
@@ -167,19 +166,19 @@ class GaussianModel:
     def get_opacity(self):
         return torch.sigmoid(self.splats["opacities"])
     
-    @property
-    def get_opacity_with_3D_filter(self):
-        opacity = torch.sigmoid(self.get_opacity[:, 0]).unsqueeze(-1)
-        # apply 3D filter
-        scales = self.get_scaling
+    # @property
+    # def get_opacity_with_3D_filter(self):
+    #     opacity = torch.sigmoid(self.get_opacity[:, 0]).unsqueeze(-1)
+    #     # apply 3D filter
+    #     scales = self.get_scaling
         
-        scales_square = torch.square(scales)
-        det1 = scales_square.prod(dim=1)
+    #     scales_square = torch.square(scales)
+    #     det1 = scales_square.prod(dim=1)
         
-        scales_after_square = scales_square + torch.square(self.filter_3D) 
-        det2 = scales_after_square.prod(dim=1) 
-        coef = torch.sqrt(det1 / det2)
-        return opacity * coef[..., None]
+    #     scales_after_square = scales_square + torch.square(self.filter_3D) 
+    #     det2 = scales_after_square.prod(dim=1) 
+    #     coef = torch.sqrt(det1 / det2)
+    #     return opacity * coef[..., None]
     
     
     def get_covariance(self, scaling_modifier = 1):
