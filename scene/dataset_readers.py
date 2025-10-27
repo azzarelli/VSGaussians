@@ -466,7 +466,7 @@ def generate_circular_cams(
     fx_new = cam.fx*zoomscale
     fy_new = cam.fy*zoomscale
     cams=[]
-    for info in contents['camera_path']:
+    for idx, info in enumerate(contents['camera_path']):
         #
         c2w = np.array(info["camera_to_world"], dtype=np.float32).reshape(4, 4)
 
@@ -489,7 +489,7 @@ def generate_circular_cams(
                     so_path=None,
                     b_path=None,
                     diff_path = None,
-                    time=cam.time,
+                    time=float(idx / 99),
                     feature=None, 
                 )
         
