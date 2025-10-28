@@ -179,10 +179,11 @@ class GUI(GUIBase):
         
         # canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
 
+        gt_out = render_gt* masked_gt
         # Loss Functions
-        deform_loss = l1_loss(render, render_gt* masked_gt)
-        
-        loss = deform_loss #+ 0.01* diff_loss
+        deform_loss = l1_loss(render, gt_out)
+        dssim = (1-ssim(render, gt_out))/2.
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim #+ 0.01* diff_loss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
@@ -190,7 +191,7 @@ class GUI(GUIBase):
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     
                     dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                    # dpg.set_value("_log_canon", f"Canon Loss: {canon_loss.item()}")
+                    dpg.set_value("_log_canon", f"Canon Loss: {dssim.item()}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
@@ -225,7 +226,6 @@ class GUI(GUIBase):
         
         gt_out = gt_img * mask
 
-        
         # Save image
         if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
             save_im = mask*relit + (1.-mask)*gt_img

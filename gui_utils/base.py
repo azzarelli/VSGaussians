@@ -194,7 +194,7 @@ class GUIBase:
                 dpg.render_dearpygui_frame()    
     
     
-            if cnt == 1:
+            if cnt == 1 and self.view_test:
                 cnt = 2
                 metrics = {
                     "mse":0.,
@@ -267,9 +267,9 @@ class GUIBase:
                 if self.iteration % 1000 == 500: # make it 500 so that we dont run this while loading view-test
                     self.track_cpu_gpu_usage(0.1)
                     
-                # Save scene when at the saving iteration
-                if self.stage == 'fine' and (self.iteration == self.final_iter-1):
-                    self.save_scene()
+                # # Save scene when at the saving iteration
+                # if self.stage == 'fine' and (self.iteration == self.final_iter-1):
+                #     self.save_scene()
 
                 self.timer.start()
                 

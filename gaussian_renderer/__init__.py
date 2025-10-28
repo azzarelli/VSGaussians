@@ -12,13 +12,12 @@ def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
     
-    opacity = torch.ones_like(pc.get_opacity, dtype=torch.float, device=means3D.device) 
+    opacity = pc.get_opacity
 
     scales = pc.get_scaling #pc.get_scaling_with_3D_filter
     
     rotations = pc.rotation_activation(pc.splats["quats"])
     
-        
     return means3D, rotations, opacity, colors, scales
 
 def process_Gaussians_triplane(pc):
