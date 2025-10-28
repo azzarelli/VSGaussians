@@ -12,7 +12,7 @@ def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
     
-    opacity = pc.get_opacity #pc.get_opacity_with_3D_filter
+    opacity = torch.ones_like(pc.get_opacity, dtype=torch.float, device=means3D.device) 
 
     scales = pc.get_scaling #pc.get_scaling_with_3D_filter
     

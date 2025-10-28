@@ -160,20 +160,7 @@ class GaussianModel:
     @property
     def get_opacity(self):
         return torch.sigmoid(self.splats["opacities"])
-    
-    # @property
-    # def get_opacity_with_3D_filter(self):
-    #     opacity = torch.sigmoid(self.get_opacity[:, 0]).unsqueeze(-1)
-    #     # apply 3D filter
-    #     scales = self.get_scaling
-        
-    #     scales_square = torch.square(scales)
-    #     det1 = scales_square.prod(dim=1)
-        
-    #     scales_after_square = scales_square + torch.square(self.filter_3D) 
-    #     det2 = scales_after_square.prod(dim=1) 
-    #     coef = torch.sqrt(det1 / det2)
-    #     return opacity * coef[..., None]
+
     
     
     def get_covariance(self, scaling_modifier = 1):
