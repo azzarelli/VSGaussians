@@ -232,8 +232,10 @@ class GUI(GUIBase):
             vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
 
         
-        gt_ycc = rgb_to_ycbcr(gt_img).squeeze(0)
+        gt_ycc = rgb_to_ycbcr(gt_out).squeeze(0)
         relit_ycc = rgb_to_ycbcr(relit).squeeze(0)
+    
+        
         return {
             "mse":mse(relit, gt_out),
             "psnr":psnr(relit, gt_out),
