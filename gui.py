@@ -219,6 +219,7 @@ class GUI(GUIBase):
         
         # Process data
         relit = relit.squeeze(0)
+        
 
         mask = viewpoint_cams.sceneoccluded_mask.cuda()
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
