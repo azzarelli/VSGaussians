@@ -515,7 +515,7 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     V_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in V_test_idx_set] # For indexs in the novel view test set
     LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
     test_cams = [L_test_cams, V_test_cams, LV_test_cams]
-    
+
     relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
     
     video_cams = generate_circular_cams(path, cam_infos[V_cam*100])

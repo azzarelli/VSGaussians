@@ -122,6 +122,8 @@ class GUIBase:
                     metrics = {
                         "mse":0.,
                         "psnr":0.,
+                        "psnr-y":0.,
+                        "psnr-crcb":0.,
                         "ssim":0.
                     }
                     
@@ -159,6 +161,8 @@ class GUIBase:
                     dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
                     dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
                     dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
+                    dpg.set_value("_log_l_4", f"psnr-y : {datasets['L']['psnr-y']:.2f}")
+                    dpg.set_value("_log_l_5", f"psnr-crcb : {datasets['L']['psnr-crcb']:.2f}")
 
                     dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
                     dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
@@ -167,6 +171,8 @@ class GUIBase:
                     dpg.set_value("_log_lv_1", f"mse  : {datasets['LV']['mse']:.3f}")
                     dpg.set_value("_log_lv_2", f"ssim : {datasets['LV']['ssim']:.3f}")
                     dpg.set_value("_log_lv_3", f"psnr : {datasets['LV']['psnr']:.2f}")
+                    dpg.set_value("_log_lv_4", f"psnr-y : {datasets['LV']['psnr-y']:.2f}")
+                    dpg.set_value("_log_lv_5", f"psnr-crcb : {datasets['LV']['psnr-crcb']:.2f}")
                     dpg.set_value("_log_test_progress", f"Saving json ...")
                     dpg.render_dearpygui_frame()
                     
@@ -194,7 +200,7 @@ class GUIBase:
                     self.track_cpu_gpu_usage(0.1)
                     
                 # Save scene when at the saving iteration
-                if self.stage == 'fine' and ((self.iteration in self.saving_iterations) or (self.iteration == self.final_iter-1)):
+                if self.stage == 'fine' and (self.iteration == self.final_iter-1):
                     self.save_scene()
 
                 self.timer.start()
@@ -371,6 +377,8 @@ class GUIBase:
                 dpg.add_text("N/A", tag="_log_l_1")
                 dpg.add_text("N/A", tag="_log_l_2")
                 dpg.add_text("N/A", tag="_log_l_3")
+                dpg.add_text("N/A", tag="_log_l_4")
+                dpg.add_text("N/A", tag="_log_l_5")
                 dpg.add_text("View-only : ")
                 dpg.add_text("N/A", tag="_log_v_1")
                 dpg.add_text("N/A", tag="_log_v_2")
@@ -379,6 +387,8 @@ class GUIBase:
                 dpg.add_text("N/A", tag="_log_lv_1")
                 dpg.add_text("N/A", tag="_log_lv_2")
                 dpg.add_text("N/A", tag="_log_lv_3")
+                dpg.add_text("N/A", tag="_log_lv_4")
+                dpg.add_text("N/A", tag="_log_lv_5")
                     
 
             # ----------------

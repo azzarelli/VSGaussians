@@ -11,6 +11,23 @@
 
 import torch
 
+def rgb_to_ycbcr(img: torch.Tensor) -> torch.Tensor:
+    """
+    Convert an RGB image or batch of images to YCbCr (BT.601).
+    Input:  [3, H, W] or [N, 3, H, W], RGB in [0,1]
+    Output: same shape, YCbCr in [0,1]
+    """
+    if img.ndim == 3:
+        img = img.unsqueeze(0)  # [1,3,H,W]
+    r, g, b = img[:, 0:1], img[:, 1:2], img[:, 2:3]
+
+    # BT.601 coefficients
+    y  = 0.299 * r + 0.587 * g + 0.114 * b
+    cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 0.5
+    cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 0.5
+
+    return torch.cat((y, cb, cr), dim=1)  # [N,3,H,W]
+
 def mse(img1, img2, per_image=False):
     assert img1.shape == img2.shape, "Inputs must have the same shape"
     diff = (img1 - img2) ** 2

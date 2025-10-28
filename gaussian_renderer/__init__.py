@@ -451,7 +451,11 @@ def sample_mipmap(I, uv, s, num_levels=3):
     """
     N = s.size(0)
     # 1. Generate mipmaps
-    maps = I # shaped list: 1,3,h,w where h,w, are the downsampled height and width per level
+    maps = I.unsqueeze(0) # F.interpolate(
+    #     I.unsqueeze(0), scale_factor=0.5,
+    #     mode='bilinear', align_corners=False,
+    #     recompute_scale_factor=True
+    # ) # shaped list: 1,3,h,w where h,w, are the downsampled height and width per level
     
     # Normalize us -1, 1 (from 0, 1)
     uv = 2.*uv -1.
@@ -459,6 +463,6 @@ def sample_mipmap(I, uv, s, num_levels=3):
     
     # Scaling mip-maps
 
-    mip_samples = F.grid_sample(maps.unsqueeze(0), uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
+    mip_samples = F.grid_sample(maps, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
     return mip_samples
     

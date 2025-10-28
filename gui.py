@@ -16,8 +16,11 @@ from torch.utils.data import DataLoader
 from utils.timer import Timer
 
 from utils.loss_utils import l1_loss, ssim
-from utils.image_utils import psnr, mse
-from gaussian_renderer import render, render_extended,render_canonical
+from utils.image_utils import psnr, mse, rgb_to_ycbcr
+from gaussian_renderer import render_extended
+
+
+
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 import matplotlib.pyplot as plt
@@ -221,14 +224,21 @@ class GUI(GUIBase):
         gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
         
         gt_out = gt_img * mask
+
         
         # Save image
         if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
-            vutils.save_image(relit, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+            save_im = mask*relit + (1.-mask)*gt_img
+            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
 
+        
+        gt_ycc = rgb_to_ycbcr(gt_img).squeeze(0)
+        relit_ycc = rgb_to_ycbcr(relit).squeeze(0)
         return {
             "mse":mse(relit, gt_out),
             "psnr":psnr(relit, gt_out),
+            "psnr-y":psnr(relit_ycc[0, ...], gt_ycc[0, ...]),
+            "psnr-crcb":psnr(relit_ycc[1:, ...], gt_ycc[1:, ...]),
             "ssim":ssim(relit, gt_out)
         }
         
