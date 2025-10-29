@@ -9,6 +9,7 @@
 module load cuda/11.8
 module load cudatoolkit/24.11_11.8
 
+source ~/miniforge3/bin/activate
 conda activate vres
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
