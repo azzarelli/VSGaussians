@@ -8,13 +8,13 @@
 
 module load cuda/11.8
 module load cudatoolkit/24.11_11.8
+python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
+# SAVEDIR=/studio4-1/studio4-1/
+# EXP_NAME=test
 
-SAVEDIR=/studio4-1/studio4-1/
-EXP_NAME=test
-
-echo "Training starting..."
-srun python gui.py -s "$SAVEDIR" \
-  --expname "$SAVEDIR/$EXP_NAME" \
-  --configs arguments/studio4.py \
-  --test_iterations 2000
+# echo "Training starting..."
+# srun python gui.py -s "$SAVEDIR" \
+#   --expname "$SAVEDIR/$EXP_NAME" \
+#   --configs arguments/studio4.py \
+#   --test_iterations 2000
