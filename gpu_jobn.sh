@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:10:00
 
-module load cuda/11.8
+# module load cuda/11.8
 
 source ~/miniforge3/bin/activate
 # conda create -n vsenv python=3.10 -y
