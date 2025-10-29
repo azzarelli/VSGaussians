@@ -4,7 +4,7 @@ import os
 import copy
 import psutil
 import torch
-from gaussian_renderer import render, render_triangles
+from gaussian_renderer import render
 from tqdm import tqdm
 import time
 import json
