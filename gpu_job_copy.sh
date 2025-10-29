@@ -13,10 +13,14 @@ source ~/miniforge3/bin/activate
 conda activate vsenv
 
 # PIP not working
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-# pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
-# pip install torch==2.1.0+nv23.10 torchvision==0.16.0+nv23.10 \
-#     --extra-index-url https://pypi.nvidia.com
+pip install --upgrade pip
+
+# Clean any previous CPU-only torch
+pip uninstall -y torch torchvision torchaudio
+
+# Install GPU-compatible torch
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
 srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 
