@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:10:00
 
-module load cuda/11.8
+# module load cuda/11.8
 
 source ~/miniforge3/bin/activate
 # conda create -n vsenv python=3.10 -y
@@ -14,8 +14,9 @@ conda activate vsenv
 
 # pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
 # pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
-pip install torch==2.1.0+nv23.10 torchvision==0.16.0+nv23.10 \
-    --extra-index-url https://pypi.nvidia.com
+# pip install torch==2.1.0+nv23.10 torchvision==0.16.0+nv23.10 \
+#     --extra-index-url https://pypi.nvidia.com
+conda install pytorch==2.0.1 torchvision==0.15.2 pytorch-cuda=11.8 -c pytorch -c nvidia -y
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 # SAVEDIR=/studio4-1/studio4-1/
