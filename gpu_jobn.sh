@@ -8,6 +8,8 @@
 
 module load cuda/11.8
 module load cudatoolkit/24.11_11.8
+
+conda activate vres
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 # SAVEDIR=/studio4-1/studio4-1/
