@@ -1,12 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=docs_ex1
-#SBATCH --output=docs_ex1.out
-#SBATCH --gpus=1
-#SBATCH --time=00:5:00         # Hours:Mins:Secs
+#SBATCH --job-name=docs_ex3
+#SBATCH --output=docs_ex3.out
+#SBATCH --gpus=1                # this allocates 72 CPU cores
+#SBATCH --ntasks-per-gpu=3
+#SBATCH --time=00:5:00
 
-module load cuda/11.8
-module load cudatoolkit/24.11_11.8
+module load cray-python
 
-hostname
-nvidia-smi --list-gpus
+srun python3 pysrun.py
