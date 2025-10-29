@@ -9,8 +9,8 @@
 # module load cuda/
 
 source ~/miniforge3/bin/activate
-# conda create -n vsenv python=3.10 -y
-conda activate vsenv
+conda create -n vsenv2 python=3.10 -y
+conda activate vsenvs
 
 # PIP not working
 # srun nvidia-smi
