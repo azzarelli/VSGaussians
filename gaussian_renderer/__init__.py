@@ -1,11 +1,9 @@
 import torch
-import math
 import torch.nn.functional as F
-import cupy as cp
 
-from gsplat.rendering import rasterization, rasterization_2dgs
+from gsplat.rendering import rasterization
 
-from gaussian_renderer.ray_tracer import RaycastSTE
+from utils.sh_utils import eval_sh
 
 
 def process_Gaussians(pc):
@@ -156,65 +154,6 @@ SIGNS = torch.tensor([[1, 1],
                       [1, -1],
                       [-1, -1]], dtype=torch.float).cuda()
 
-def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1):
-     # Determine the point in local Gaussian space where the curve of the 2-D Gaussian in the top-right (positive x-y) quadrant
-    #  reached y=-x
-    # c = 3.218875825 # fixed confidence at 0.8 
-    # mag_sq = mag **2
-    # a_prime = mag_sq[:, 0] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
-    # b_prime = mag_sq[:, 1] * torch.sqrt(c/(mag_sq[:, 0] + mag_sq[:, 1]))  
-    # print(a_prime.shape, mag.shape)
-    # exit()
-    
-    signs = torch.tensor([[1, 1],
-                      [-1, 1],
-                      [1, -1],
-                      [-1, -1]], device=mag.device, dtype=mag.dtype)
-    
-    mask = (opacity.squeeze(-1) > thresh)
-    colors = colors[mask]
-    means = means[mask]
-    mag = mag[mask]
-    dirs = dirs[mask]
-    
-    # Expand for broadcasting: (N, 4, 2, 3)
-    reflected = means.unsqueeze(1).unsqueeze(1) + (signs.unsqueeze(0).unsqueeze(-1) * mag.unsqueeze(1).unsqueeze(-1) * dirs.unsqueeze(1))
-
-    # reflected: (N, 4, 2, 3)
-    # Concatenate the center point to each reflected triangle
-    tris = torch.cat([means.unsqueeze(1).unsqueeze(1).expand(-1, 4, -1, -1), reflected], dim=2)  # (N, 4, 3, 3)
-
-    # Flatten all triangles
-    return tris.reshape(-1, 3), colors
-
-def r_render(x, d, n, abc, texture, optix_runner, means3D, pc, colors, opacity, N=4, update_verts=False):
-    """Ray-Screen Intersection w/ intersection mask
-        args:
-            N : int, number of triangles per gaussian
-            update_verts : bool, one needs to be here once
-    """
-    x,d = x.squeeze(0), d.squeeze(0)
-    render, hit_mask, hit_indices = sample_IBL(x, d, abc, texture.cuda())
-    # Select x and d for sampling scene, no need to resample scene where ray-screen intersection already exists
-    # x_, d_ = x[~hit_mask], d[~hit_mask]
-    
-    """Ray-Scene Intersection w/ masked origin and directions
-    """
-    # Generate triangle primitives from Gaussian
-    if update_verts:
-        mag, dirs = pc.get_covmat
-        verts, colors = generate_triangles(means3D, mag, dirs, colors, opacity)
-        verts = verts.detach()
-    else:
-        verts = None
-    # Forward through runner
-    buffer_image = RaycastSTE.apply(x,d,N,colors, verts, optix_runner, update_verts)
-    
-
-    render = render.permute(1,2,0)
-    render[~hit_mask] = buffer_image[~hit_mask]
-    
-    return render
 
 @torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None):
@@ -305,37 +244,6 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
         "extras":extras # A dict containing mor point info
         }
 
-from utils.sh_utils import SH2RGB
-
-
-import time as TIME
-@torch.no_grad 
-def render_triangles(viewpoint_camera, pc, optix_runner):
-    """
-    Render the scene for viewing
-    """
-    time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
-    means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
-    
-    x, d = viewpoint_camera.generate_rays(ctype="tris")
-
-    mag, dirs = pc.get_covmat
-    verts, colors = generate_triangles(means3D, mag, dirs, colors, opacity)
-    colors_rgb = SH2RGB(colors[:, :3]).clamp(0.0, 1.0)
-
-    verts = verts.detach()
-    N = 4
-    # Forward through runner
-    buffer_image = RaycastSTE.apply(x, d, N, colors_rgb, verts, optix_runner, False)
-    
-
-    # buffer_image[buffer_hitIndices > 0] *= 0.
-    # buffer_image[buffer_hitIndices > 0] += 1.
-    
-    return buffer_image
-
-
-from utils.sh_utils import eval_sh
 def render_extended(viewpoint_camera, pc, textures, return_canon=False):
     """Fine/Deformation function
 
