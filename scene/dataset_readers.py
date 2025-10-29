@@ -13,7 +13,7 @@ from utils.sh_utils import SH2RGB
 # from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
-    read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+    read_extrinsics_binary, read_intrinsics_binary
 class CameraInfo(NamedTuple):
     R: np.array
     T: np.array
@@ -380,7 +380,7 @@ def readCamerasFromTransforms(path, transformsfile):
         T = c2w[:3, 3]
 
         image_path = os.path.normpath(os.path.join(path, frame["file_path"]))
-
+        
         cam_infos.append(CameraInfo(
             uid=frame.get("colmap_im_id", idx),
             R=R, T=T,
