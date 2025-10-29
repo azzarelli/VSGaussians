@@ -9,8 +9,8 @@
 module load cuda/11.8
 
 source ~/miniforge3/bin/activate
-conda create -n vsenv python=3.10 -y
-
+# conda create -n vsenv python=3.10 -y
+conda activate vsenv
 srun nvidia-smi --list-gpus
 pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
