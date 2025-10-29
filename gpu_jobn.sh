@@ -8,4 +8,4 @@
 
 module load cray-python
 
-srun python3 pysrun.py
+srun python3 python_test.py
