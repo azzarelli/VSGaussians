@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:10:00
 
-module load cuda/11.8
+# module load cuda/
 
 source ~/miniforge3/bin/activate
 # conda create -n vsenv python=3.10 -y
@@ -18,7 +18,7 @@ conda activate vsenv
 # pip uninstall -y torch torchvision torchaudio
 # 
 # # Install GPU-compatible torch
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
