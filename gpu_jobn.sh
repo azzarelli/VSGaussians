@@ -14,7 +14,8 @@ conda activate vsenv
 
 # pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
 # pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
-pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.1.0+nv23.10 torchvision==0.16.0+nv23.10 \
+    --extra-index-url https://pypi.nvidia.com
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 # SAVEDIR=/studio4-1/studio4-1/
