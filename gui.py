@@ -188,7 +188,7 @@ class GUI(GUIBase):
         
         
         dssim = (1-ssim(render, gt_out))/2.
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + 0.2*canon_loss 
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss 
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():

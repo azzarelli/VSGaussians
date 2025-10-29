@@ -133,6 +133,7 @@ class OptimizationParams(ParamGroup):
 
         # Regularization
         self.lambda_dssim = 0.2
+        self.lambda_canon = 0.2
         self.lambda_dist = 0.0
         self.lambda_normal = 0.05
         self.lambda_alpha = 0.1
