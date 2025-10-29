@@ -12,7 +12,7 @@ source ~/miniforge3/bin/activate
 conda activate vres
 
 srun nvidia-smi --list-gpus
-
+conda install pytorch==2.4.0 torchvision==0.19.0 pytorch-cuda=11.8 -c pytorch -c nvidia
 python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 # SAVEDIR=/studio4-1/studio4-1/
