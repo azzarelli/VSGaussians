@@ -14,14 +14,14 @@ conda activate vsenv
 
 # PIP not working
 pip install --upgrade pip
-
+srun nvidia-smi
 # Clean any previous CPU-only torch
-pip uninstall -y torch torchvision torchaudio
+# pip uninstall -y torch torchvision torchaudio
 
-# Install GPU-compatible torch
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# # Install GPU-compatible torch
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
+# srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
 
 # SAVEDIR=/studio4-1/studio4-1/
