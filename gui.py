@@ -1,6 +1,11 @@
 
 import shutil
-import dearpygui.dearpygui as dpg
+try:
+    import dearpygui.dearpygui as dpg
+except:
+    print("No dpg running")
+    dpg = None
+
 import numpy as np
 import random
 import os, sys
@@ -193,11 +198,11 @@ class GUI(GUIBase):
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
-                    dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
-                    
-                    dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                    dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
-                    dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
+                dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
+                
+                dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
+                dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
             # Error if loss becomes nan
@@ -329,7 +334,7 @@ if __name__ == "__main__":
         expname=name,
         view_test=args.view_test,
 
-        use_gui=True,
+        use_gui=False if dpg is None else True,
     )
     gui.render()
     del gui

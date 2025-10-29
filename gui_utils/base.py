@@ -1,4 +1,9 @@
-import dearpygui.dearpygui as dpg
+try:
+    import dearpygui.dearpygui as dpg
+except:
+    print("No dpg running")
+    dpg = None
+
 import numpy as np
 import os
 import copy
@@ -81,135 +86,210 @@ class GUIBase:
     def render(self):
         self.switch_off_viewer = True            
 
-        while dpg.is_dearpygui_running():
-            if self.view_test == False:
+        if self.gui:
+            while dpg.is_dearpygui_running():
+                if self.view_test == False:
 
 
-                dpg.set_value("_log_stage", self.stage)
+                    dpg.set_value("_log_stage", self.stage)
 
-                if self.iteration <= self.final_iter:
+                    if self.iteration <= self.final_iter:
+                        # Get batch data
+                        viewpoint_cams = self.get_batch_views
+                        
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        self.iter_start.record()
+                        
+                        # Depending on stage process a training step
+                        self.train_step(viewpoint_cams)
+
+                        self.iter_end.record()
                     
-                    xyz_start = self.gaussians.get_xyz.shape[0]
-                    # Get batch data
-                    viewpoint_cams = self.get_batch_views
-                    
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    self.iter_start.record()
-                    
-                    # Depending on stage process a training step
-                    self.train_step(viewpoint_cams)
+                    else: # Initialize fine from coarse stage
+                        if self.stage == 'fine':
+                            self.stage = 'done'
+                            view_size=len(self.scene.video_camera)
+                            for i, test_cam in enumerate(self.scene.video_camera):
+                                metric_results = self.video_step(test_cam, i)
 
-                    self.iter_end.record()
-                
-                else: # Initialize fine from coarse stage
-                    if self.stage == 'fine':
-                        self.stage = 'done'
-                        view_size=len(self.scene.video_camera)
-                        for i, test_cam in enumerate(self.scene.video_camera):
-                            metric_results = self.video_step(test_cam, i)
+                                dpg.set_value("_log_test_progress", f"{int(100*(i/view_size))}% | novel view video")
+                                dpg.render_dearpygui_frame()
 
-                            dpg.set_value("_log_test_progress", f"{int(100*(i/view_size))}% | novel view video")
+                            dpg.stop_dearpygui()
+                            
+                    # Test Step
+                    if self.iteration % self.test_every == 0:
+                        metrics = {
+                            "mse":0.,
+                            "psnr":0.,
+                            "psnr-y":0.,
+                            "psnr-crcb":0.,
+                            "ssim":0.
+                        }
+                        
+                        datasets = {
+                            "L":metrics.copy(),
+                            "V":metrics.copy(),
+                            "LV":metrics.copy(),
+                        }
+                        test_size = len(self.scene.test_camera)
+                        dataset_idxs = self.scene.test_camera.subset_idxs
+
+                        for i, test_cam in enumerate(self.scene.test_camera):
+                            if i < dataset_idxs[0]: # L-only tests
+                                d_type = "L"
+                            elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                                d_type = "V"
+                            else:
+                                d_type = "LV"
+                                
+                            metric_results = self.test_step(test_cam, i, d_type)
+                        
+                                
+                            for key in metrics.keys():
+                                datasets[d_type][key] += metric_results[key].item()
+                            
+                            dpg.set_value("_log_test_progress", f"{int(100*(i/test_size))}% | {metric_results['psnr']:.2f} on {d_type} type")
                             dpg.render_dearpygui_frame()
 
-                        dpg.stop_dearpygui()
-                        
-                # xyz_end = self.gaussians.get_xyz.shape[0]
-                
-                # if xyz_start != xyz_end or self.iteration % 500 == 0:
-                #     self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+                        # Average
+                        for key, lengths in zip(datasets.keys(), dataset_idxs):
+                            for key_1 in metrics.keys():
+                                datasets[key][key_1] /= lengths
 
-                
-                # Test Step
-                if self.iteration % self.test_every == 0:
-                    metrics = {
-                        "mse":0.,
-                        "psnr":0.,
-                        "psnr-y":0.,
-                        "psnr-crcb":0.,
-                        "ssim":0.
-                    }
-                    
-                    datasets = {
-                        "L":metrics.copy(),
-                        "V":metrics.copy(),
-                        "LV":metrics.copy(),
-                    }
-                    test_size = len(self.scene.test_camera)
-                    dataset_idxs = self.scene.test_camera.subset_idxs
+                        # Logs with 3 decimal places
+                        dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
+                        dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
+                        dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
+                        dpg.set_value("_log_l_4", f"psnr-y : {datasets['L']['psnr-y']:.2f}")
+                        dpg.set_value("_log_l_5", f"psnr-crcb : {datasets['L']['psnr-crcb']:.2f}")
 
-                    for i, test_cam in enumerate(self.scene.test_camera):
-                        if i < dataset_idxs[0]: # L-only tests
-                            d_type = "L"
-                        elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
-                            d_type = "V"
-                        else:
-                            d_type = "LV"
-                            
-                        metric_results = self.test_step(test_cam, i, d_type)
-                    
-                            
-                        for key in metrics.keys():
-                            datasets[d_type][key] += metric_results[key].item()
-                        
-                        dpg.set_value("_log_test_progress", f"{int(100*(i/test_size))}% | {metric_results['psnr']:.2f} on {d_type} type")
+                        dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
+                        dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
+                        dpg.set_value("_log_v_3", f"psnr : {datasets['V']['psnr']:.2f}")
+
+                        dpg.set_value("_log_lv_1", f"mse  : {datasets['LV']['mse']:.3f}")
+                        dpg.set_value("_log_lv_2", f"ssim : {datasets['LV']['ssim']:.3f}")
+                        dpg.set_value("_log_lv_3", f"psnr : {datasets['LV']['psnr']:.2f}")
+                        dpg.set_value("_log_lv_4", f"psnr-y : {datasets['LV']['psnr-y']:.2f}")
+                        dpg.set_value("_log_lv_5", f"psnr-crcb : {datasets['LV']['psnr-crcb']:.2f}")
+                        dpg.set_value("_log_test_progress", f"Saving json ...")
                         dpg.render_dearpygui_frame()
-
-                    # Average
-                    for key, lengths in zip(datasets.keys(), dataset_idxs):
-                        for key_1 in metrics.keys():
-                            datasets[key][key_1] /= lengths
-
-                    # Logs with 3 decimal places
-                    dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
-                    dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
-                    dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
-                    dpg.set_value("_log_l_4", f"psnr-y : {datasets['L']['psnr-y']:.2f}")
-                    dpg.set_value("_log_l_5", f"psnr-crcb : {datasets['L']['psnr-crcb']:.2f}")
-
-                    dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
-                    dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
-                    dpg.set_value("_log_v_3", f"psnr : {datasets['V']['psnr']:.2f}")
-
-                    dpg.set_value("_log_lv_1", f"mse  : {datasets['LV']['mse']:.3f}")
-                    dpg.set_value("_log_lv_2", f"ssim : {datasets['LV']['ssim']:.3f}")
-                    dpg.set_value("_log_lv_3", f"psnr : {datasets['LV']['psnr']:.2f}")
-                    dpg.set_value("_log_lv_4", f"psnr-y : {datasets['LV']['psnr-y']:.2f}")
-                    dpg.set_value("_log_lv_5", f"psnr-crcb : {datasets['LV']['psnr-crcb']:.2f}")
-                    dpg.set_value("_log_test_progress", f"Saving json ...")
-                    dpg.render_dearpygui_frame()
-                    
-                    test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
-                    with open(test_fp, "w") as outfile:
-                        json.dump(datasets, outfile, indent=4, ensure_ascii=False)
+                        
+                        test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
+                        with open(test_fp, "w") as outfile:
+                            json.dump(datasets, outfile, indent=4, ensure_ascii=False)
+                            
+                            
+                        dpg.set_value("_log_test_progress", f"...(training)...")
+                        dpg.render_dearpygui_frame()
                         
                         
-                    dpg.set_value("_log_test_progress", f"...(training)...")
-                    dpg.render_dearpygui_frame()
-                    
-                    
-                # Update iteration
-                self.iteration += 1
+                    # Update iteration
+                    self.iteration += 1
 
 
-            with torch.no_grad():
-                self.viewer_step()
-                dpg.render_dearpygui_frame()    
-                
-            with torch.no_grad():
-                self.timer.pause() # log and save
-                torch.cuda.synchronize()
-                if self.iteration % 1000 == 500: # make it 500 so that we dont run this while loading view-test
-                    self.track_cpu_gpu_usage(0.1)
+                with torch.no_grad():
+                    self.viewer_step()
+                    dpg.render_dearpygui_frame()    
                     
-                # Save scene when at the saving iteration
-                if self.stage == 'fine' and (self.iteration == self.final_iter-1):
-                    self.save_scene()
+                with torch.no_grad():
+                    self.timer.pause() # log and save
+                    torch.cuda.synchronize()
+                    if self.iteration % 1000 == 500: # make it 500 so that we dont run this while loading view-test
+                        self.track_cpu_gpu_usage(0.1)
+                        
+                    # Save scene when at the saving iteration
+                    if self.stage == 'fine' and (self.iteration == self.final_iter-1):
+                        self.save_scene()
 
-                self.timer.start()
-                
-        dpg.destroy_context()
- 
+                    self.timer.start()
+                    
+            dpg.destroy_context()
+        else:
+            while self.stage != 'done':
+                if self.view_test == False:
+                    if self.iteration % 100 == 0:
+                        print(f"[ITER {self.iteration}/{self.final_iter}] Training ...")
+                    if self.iteration <= self.final_iter:
+                        # Get batch data
+                        viewpoint_cams = self.get_batch_views
+                        
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        self.iter_start.record()
+                        
+                        # Depending on stage process a training step
+                        self.train_step(viewpoint_cams)
+
+                        self.iter_end.record()
+                    
+                    else: # Initialize fine from coarse stage
+                        if self.stage == 'fine':
+                            self.stage = 'done'
+                            view_size=len(self.scene.video_camera)
+                            for i, test_cam in enumerate(self.scene.video_camera):
+                                metric_results = self.video_step(test_cam, i)
+                            
+                    # Test Step
+                    if self.iteration % self.test_every == 0:
+                        metrics = {
+                            "mse":0.,
+                            "psnr":0.,
+                            "psnr-y":0.,
+                            "psnr-crcb":0.,
+                            "ssim":0.
+                        }
+                        
+                        datasets = {
+                            "L":metrics.copy(),
+                            "V":metrics.copy(),
+                            "LV":metrics.copy(),
+                        }
+                        test_size = len(self.scene.test_camera)
+                        dataset_idxs = self.scene.test_camera.subset_idxs
+
+                        for i, test_cam in enumerate(self.scene.test_camera):
+                            if i < dataset_idxs[0]: # L-only tests
+                                d_type = "L"
+                            elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                                d_type = "V"
+                            else:
+                                d_type = "LV"
+                                
+                            metric_results = self.test_step(test_cam, i, d_type)
+                        
+                                
+                            for key in metrics.keys():
+                                datasets[d_type][key] += metric_results[key].item()
+                            
+                        # Average
+                        for key, lengths in zip(datasets.keys(), dataset_idxs):
+                            for key_1 in metrics.keys():
+                                datasets[key][key_1] /= lengths
+
+                        
+                        test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
+                        with open(test_fp, "w") as outfile:
+                            json.dump(datasets, outfile, indent=4, ensure_ascii=False)
+                        print(datasets)
+                        
+                    # Update iteration
+                    self.iteration += 1
+              
+                with torch.no_grad():
+                    self.timer.pause() # log and save
+                    torch.cuda.synchronize()
+                    if self.iteration % 1000 == 500: # make it 500 so that we dont run this while loading view-test
+                        self.track_cpu_gpu_usage(0.1)
+                        
+                    # Save scene when at the saving iteration
+                    # if self.stage == 'fine' and (self.iteration == self.final_iter-1):
+                    #     self.save_scene()
+
+                    self.timer.start()
+                     
     @torch.no_grad()
     def viewer_step(self):
         t0 = time.time()
