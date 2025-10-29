@@ -20,7 +20,7 @@ class FourDGSdataset(Dataset):
         
         self.loading_flags = {
             "image":True if dataset_type not in ['video'] else False,
-            "canon":False,
+            "canon":True if dataset_type in ['train'] else False,
             "scene_occluded":True if dataset_type not in ['video'] else False,
             "differences":False,
         }

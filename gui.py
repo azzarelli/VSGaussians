@@ -165,11 +165,11 @@ class GUI(GUIBase):
             id1 = int(cam.time*self.scene.maxframes)
             textures.append(self.scene.ibl[id1])
         
-        render, info = render_extended(
+        render,canon, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
-            return_canon=False
+            return_canon=True
         )
 
         self.gaussians.pre_backward(self.iteration, info)
@@ -177,13 +177,18 @@ class GUI(GUIBase):
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         
-        # canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
+        canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
 
         gt_out = render_gt* masked_gt
+        canon_out = canons_gt* masked_gt
+        
         # Loss Functions
         deform_loss = l1_loss(render, gt_out)
+        canon_loss = l1_loss(canon, canon_out)
+        
+        
         dssim = (1-ssim(render, gt_out))/2.
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim #+ 0.01* diff_loss
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + 0.2*canon_loss 
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
@@ -191,7 +196,7 @@ class GUI(GUIBase):
                     dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                     
                     dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                    dpg.set_value("_log_canon", f"Canon Loss: {dssim.item()}")
+                    dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
                     dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
