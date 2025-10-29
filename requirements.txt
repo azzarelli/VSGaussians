@@ -12,4 +12,4 @@ PyWavelets
 ninja
 jaxtyping
 rich
-dearpygui
+
