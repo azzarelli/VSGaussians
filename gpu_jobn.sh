@@ -8,12 +8,16 @@
 
 module load cuda/11.8
 
+# (2) Activate your environment
 source ~/miniforge3/bin/activate
 conda activate vres
 
-srun nvidia-smi --list-gpus
+# (3) Completely remove the CPU build
+conda remove pytorch torchvision torchaudio pytorch-cuda -y
+conda clean --all -y
 
-python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
+# (4) Reinstall from the correct CUDA-enabled channels
+conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 
 # SAVEDIR=/studio4-1/studio4-1/
 # EXP_NAME=test
