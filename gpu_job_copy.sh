@@ -10,7 +10,7 @@
 
 source ~/miniforge3/bin/activate
 conda create -n vsenv2 python=3.10 -y
-conda activate vsenvs
+conda activate vsenv2
 
 # PIP not working
 # srun nvidia-smi
