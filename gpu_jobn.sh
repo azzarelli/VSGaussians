@@ -7,7 +7,6 @@
 #SBATCH --time=00:5:00
 
 module load cuda/11.8
-module load cudatoolkit/24.11_11.8
 
 source ~/miniforge3/bin/activate
 conda activate vres
