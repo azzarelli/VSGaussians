@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#SBATCH --job-name=docs_ex3
-#SBATCH --output=docs_ex3.out
+#SBATCH --job-name=test_run
+#SBATCH --output=test_run.out
 #SBATCH --gpus=1
-#SBATCH --ntasks-per-gpu=1
+#SBATCH --ntasks-per-gpu=3
 #SBATCH --time=00:10:00
 
 
@@ -20,10 +20,10 @@ pip install -r requirements.txt
 # python python_test.py
 
 
-# SAVEDIR=/studio4-1/studio4-1/
-# EXP_NAME=test
-# echo "Training starting..."
-# srun python gui.py -s "$SAVEDIR" \
-#   --expname "$SAVEDIR/$EXP_NAME" \
-#   --configs arguments/studio4.py \
-#   --test_iterations 2000
+SAVEDIR=/studio4-1/
+EXP_NAME=test
+echo "Training starting..."
+srun python gui.py -s "$SAVEDIR" \
+  --expname "$SAVEDIR/$EXP_NAME" \
+  --configs arguments/studio4.py \
+  --test_iterations 2000
