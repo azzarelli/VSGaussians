@@ -7,5 +7,5 @@ declare -a EXPNAMES=("baseline")
 
 for i in "${!CONFIGS[@]}"; do
   echo "Submitting job for ${CONFIGS[$i]}..."
-  sbatch gpu_jobn.sh "${CONFIGS[$i]}" "${EXPNAMES[$i]}"
+  sbatch gpu_jobn.sh -- "${CONFIGS[$i]}" "${EXPNAMES[$i]}"
 done
