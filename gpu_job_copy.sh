@@ -12,9 +12,9 @@ module load cudatoolkit
 
 source ~/miniforge3/bin/activate
 conda activate vsenv
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-pip install wheel
-TORCH_CUDA_ARCH_LIST="9.0" CC=gcc-13 CXX=g++-13 pip install --no-build-isolation git+https://github.com/nerfstudio-project/gsplat
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# pip install wheel
+# TORCH_CUDA_ARCH_LIST="9.0" CC=gcc-13 CXX=g++-13 pip install --no-build-isolation git+https://github.com/nerfstudio-project/gsplat
 
 
 python python_test.py
