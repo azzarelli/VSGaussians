@@ -4,7 +4,7 @@
 #SBATCH --output=test_run.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
-#SBATCH --time=08:00:00
+#SBATCH --time=00:01:00
 
 # Skip the leading "--"
 if [[ $1 == "--" ]]; then
