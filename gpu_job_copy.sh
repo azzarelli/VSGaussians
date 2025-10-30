@@ -6,19 +6,20 @@
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:10:00
 
-# module load cuda/
+module load cuda/11.8
 
 source ~/miniforge3/bin/activate
-conda create -n vsenv2 python=3.10 -y
-conda activate vsenv2
+conda create -n vsenv python=3.10 -y
 
-# PIP not working
-# srun nvidia-smi
-# Clean any previous CPU-only torch
-# pip uninstall -y torch torchvision torchaudio
-# 
-# # Install GPU-compatible torch
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+module load cray-python
+module load cudatoolkit
+
+conda activate vsenv
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install wheel
+TORCH_CUDA_ARCH_LIST="9.0" CC=gcc-13 CXX=g++-13 pip install --no-build-isolation git+https://github.com/nerfstudio-project/gsplat
+
 
 srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
 
