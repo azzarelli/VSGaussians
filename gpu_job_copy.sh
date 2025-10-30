@@ -17,7 +17,7 @@ pip install wheel
 TORCH_CUDA_ARCH_LIST="9.0" CC=gcc-13 CXX=g++-13 pip install --no-build-isolation git+https://github.com/nerfstudio-project/gsplat
 
 
-srun python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())"
+python python_test.py
 
 
 # SAVEDIR=/studio4-1/studio4-1/
