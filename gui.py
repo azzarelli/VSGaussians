@@ -237,9 +237,9 @@ class GUI(GUIBase):
         gt_out = gt_img * mask
 
         # Save image
-        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
-            save_im = mask*relit + (1.-mask)*gt_img
-            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+        # if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
+        #     save_im = mask*relit + (1.-mask)*gt_img
+        #     vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
 
         
         gt_ycc = rgb_to_ycbcr(gt_out).squeeze(0)
@@ -283,7 +283,7 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     print('Runing from ... ',os.environ["SLURM_PROCID"])
-    
+    exit()
     parser = ArgumentParser(description="Training script parameters")
     setup_seed(6666)
     lp = ModelParams(parser)

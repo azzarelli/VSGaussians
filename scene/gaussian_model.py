@@ -506,12 +506,12 @@ class GaussianModel:
             ("sh0", nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
             ("shN", nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
 
-            ("lambda_sh0", nn.Parameter(lambda_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
-            ("lambda_shN", nn.Parameter(lambda_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
+            ("lambda_sh0", nn.Parameter(lambda_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.lambda_lr),
+            ("lambda_shN", nn.Parameter(lambda_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.lambda_lr/20.),
             
-            ("ab_sh0", nn.Parameter(ab_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
-            ("ab_shN", nn.Parameter(ab_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
-            ("tex_scale",nn.Parameter(texscale.cuda().requires_grad_(True)), training_args.opacity_lr),
+            ("ab_sh0", nn.Parameter(ab_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.tex_mu_lr),
+            ("ab_shN", nn.Parameter(ab_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.tex_mu_lr/20.),
+            ("tex_scale",nn.Parameter(texscale.cuda().requires_grad_(True)), training_args.tex_s_lr),
 
             
         }

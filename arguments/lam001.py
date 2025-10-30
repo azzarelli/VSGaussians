@@ -27,8 +27,12 @@ OptimizationParams = dict(
     lambda_alpha=1.,
     lambda_inv=0.1,
     
-    opacity_lr =0.005,
-    
+    opacity_lr =0.01,
+
+    lambda_lr = 0.001,# 0.0025,
+    tex_mu_lr = 0.0025,
+    tex_s_lr = 0.0025,
+
     densify_from_iter = 100,
     densify_until_iter = 3000,
     opacity_reset_interval = 3000,    

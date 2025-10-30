@@ -130,6 +130,10 @@ class OptimizationParams(ParamGroup):
         
         # Relighting learning parameters
         self.invariance_lr = 0.001
+        self.lambda_lr = 0.0025
+        self.tex_mu_lr = 0.0025
+        self.tex_s_lr = 0.0025
+
 
         # Regularization
         self.lambda_dssim = 0.2
