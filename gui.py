@@ -282,8 +282,8 @@ if __name__ == "__main__":
     # Set up command line argument parser
     torch.cuda.empty_cache()
 
-    print('Runing from ... ',os.environ["SLURM_PROCID"])
-    exit()
+    # print('Runing from ... ',os.environ["SLURM_PROCID"])
+    # exit()
     parser = ArgumentParser(description="Training script parameters")
     setup_seed(6666)
     lp = ModelParams(parser)

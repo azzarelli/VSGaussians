@@ -216,56 +216,6 @@ def process_relighting_cams(path, unsorted_cams, N=100):
             
     return relighting_cams, background_paths
             
-import open3d as o3d
-def downsample_pointcloud_voxel_target(pcd, target_points=100_000, max_iter=10, verbose=True):
-    """
-    """
-    # Convert to Open3D point cloud
-    pcd_o3d = o3d.geometry.PointCloud()
-    pcd_o3d.points = o3d.utility.Vector3dVector(pcd.points)
-    pcd_o3d.colors = o3d.utility.Vector3dVector(pcd.colors)
-    pcd_o3d.normals = o3d.utility.Vector3dVector(pcd.normals)
-
-    N = np.asarray(pcd.points).shape[0]
-
-    # Initial voxel search range
-    bbox = pcd_o3d.get_axis_aligned_bounding_box()
-    diag = np.linalg.norm(np.asarray(bbox.get_max_bound()) - np.asarray(bbox.get_min_bound()))
-    voxel_min = diag / 5000.0  # start small
-    voxel_max = diag / 50.0    # start large
-
-    best_pcd = pcd_o3d
-    best_diff = float("inf")
-
-    for i in range(max_iter):
-        voxel_size = (voxel_min + voxel_max) / 2.0
-        pcd_ds = pcd_o3d.voxel_down_sample(voxel_size)
-        n_points = len(pcd_ds.points)
-
-        diff = abs(n_points - target_points)
-        if diff < best_diff:
-            best_pcd, best_diff = pcd_ds, diff
-
-        if verbose:
-            print(f"[{i+1}/{max_iter}] voxel={voxel_size:.5f} → {n_points} pts (target {target_points})")
-
-        # Adjust search bounds
-        if n_points > target_points:
-            voxel_min = voxel_size
-        else:
-            voxel_max = voxel_size
-
-        # Early stop if we're close enough
-        if diff / target_points < 0.05:
-            break
-
-    # Convert back to BasicPointCloud
-    return BasicPointCloud(
-        points=np.asarray(best_pcd.points),
-        colors=np.asarray(best_pcd.colors),
-        normals=np.asarray(best_pcd.normals)
-    )
-
 def readColmapInfo(path, N=98, downsample=2):
     """Construct data frames for each typice
     
@@ -315,8 +265,8 @@ def readColmapInfo(path, N=98, downsample=2):
     except:
         pcd = None
     
-    if pcd.points.shape[0] > 120000:
-        pcd = downsample_pointcloud_voxel_target(pcd, target_points=50_000)
+    # if pcd.points.shape[0] > 120000:
+    #     pcd = downsample_pointcloud_voxel_target(pcd, target_points=50_000)
     
     
     scene_info = SceneInfo(
@@ -380,7 +330,7 @@ def readCamerasFromTransforms(path, transformsfile):
         T = c2w[:3, 3]
 
         image_path = os.path.normpath(os.path.join(path, frame["file_path"]))
-        
+
         cam_infos.append(CameraInfo(
             uid=frame.get("colmap_im_id", idx),
             R=R, T=T,
