@@ -3,8 +3,8 @@
 #SBATCH --job-name=test_run
 #SBATCH --output=test_run.out
 #SBATCH --gpus=1
-#SBATCH --ntasks-per-gpu=3
-#SBATCH --time=00:10:00
+#SBATCH --ntasks-per-gpu=1
+#SBATCH --time=00:2:00
 
 
 module load cray-python
@@ -16,14 +16,13 @@ conda activate vsenv
 # pip install wheel
 # TORCH_CUDA_ARCH_LIST="9.0" CC=gcc-13 CXX=g++-13 pip install --no-build-isolation git+https://github.com/nerfstudio-project/gsplat
 
-pip install -r requirements.txt
-# python python_test.py
+python python_test.py
 
 
-SAVEDIR=/studio4-1/
-EXP_NAME=test
-echo "Training starting..."
-srun python gui.py -s "$SAVEDIR" \
-  --expname "$SAVEDIR/$EXP_NAME" \
-  --configs arguments/studio4.py \
-  --test_iterations 2000
+# SAVEDIR=/studio4-1/
+# EXP_NAME=test
+# echo "Training starting..."
+# srun python gui.py -s "$SAVEDIR" \
+#   --expname "$SAVEDIR/$EXP_NAME" \
+#   --configs arguments/studio4.py \
+#   --test_iterations 2000

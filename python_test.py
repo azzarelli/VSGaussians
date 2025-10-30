@@ -18,3 +18,5 @@ print(torch.version.cuda)
 tensor = torch.rand(3, 3).cuda()
 
 print("Random Tensor:", tensor.device)
+
+print(os.listdir('.'))
