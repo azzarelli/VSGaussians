@@ -12,16 +12,17 @@ module load cudatoolkit
 source ~/miniforge3/bin/activate
 conda activate vsenv
 
-export OPENBLAS_NUM_THREADS=1
-export OMP_NUM_THREADS=1
-
 SAVEDIR=$HOME/data/studio4-1/
+
+ARGS="studio4.py"
+EXP_NAME="baseline"
+
+
 echo "Running with:"
 echo "  CONFIG: $ARGS"
 echo "  EXP_NAME: $EXP_NAME"
 
-echo "Training starting..."
-srun python gui.py -s "$SAVEDIR" \
+python gui.py -s "$SAVEDIR" \
   --expname "$SAVEDIR/$EXP_NAME" \
   --configs "arguments/$ARGS" \
   --test_iterations 4000
