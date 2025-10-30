@@ -4,7 +4,7 @@
 #SBATCH --output=docs_ex3.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
-#SBATCH --time=00:40:00
+#SBATCH --time=00:01:00
 
 
 module load cray-python
