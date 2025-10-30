@@ -19,7 +19,7 @@ conda activate vsenv
 # python python_test.py
 
 
-SAVEDIR=/data/studio4-1/
+SAVEDIR=$HOME/data/studio4-1/
 EXP_NAME=test
 echo "Training starting..."
 srun python gui.py -s "$SAVEDIR" \
