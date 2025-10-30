@@ -6,15 +6,11 @@
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:10:00
 
-module load cuda/11.8
-
-source ~/miniforge3/bin/activate
-conda create -n vsenv python=3.10 -y
-
 
 module load cray-python
 module load cudatoolkit
 
+source ~/miniforge3/bin/activate
 conda activate vsenv
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 pip install wheel
