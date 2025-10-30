@@ -1,10 +1,8 @@
 
 import os
-from time import sleep
 from datetime import datetime
 import socket
 import torch
-sleep(30)
 
 time_now = datetime.now().strftime("%H:%M:%S")
 
