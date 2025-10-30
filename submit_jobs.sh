@@ -6,6 +6,9 @@ declare -a EXPNAMES=("baseline")
 # "lam01" "lam0075" "lam005" "lam001")
 
 for i in "${!CONFIGS[@]}"; do
-  echo "Submitting job for ${CONFIGS[$i]}..."
-  sbatch gpu_jobn.sh -- "${CONFIGS[$i]}" "${EXPNAMES[$i]}"
+  CONFIG=${CONFIGS[$i]}
+  EXP=${EXPNAMES[$i]}
+
+  echo "Submitting job for $CONFIG..."
+  sbatch --export=ALL,ARGS="$CONFIG",EXP_NAME="$EXP" gpu_jobn.sh
 done
