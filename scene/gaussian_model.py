@@ -52,7 +52,6 @@ class GaussianModel:
         
         self.gsplat_optimizers = None
         
-        self.percent_dense = 0
         self.spatial_lr_scale = 0
         self.spatial_lr_scale_background = 0
         self.target_neighbours = None
@@ -208,67 +207,22 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def training_canonical_setup(self, training_args):        
-        ##### Set-up GSplat optimizers #####
-        self.percent_dense = training_args.percent_dense
-
+    def training_setup(self, training_args):        
+        ##### Set-up GSplat optimizers #####        
         if self.use_default_strategy:
             self.strategy = DefaultStrategy(
                 verbose=True,
-                prune_opa=0.005,
-                grow_grad2d=0.0001,
-                grow_scale3d=0.01,
-                grow_scale2d=0.1,
                 
-                prune_scale3d=0.2,
+                prune_opa=training_args.prune_opa,
+                grow_grad2d=training_args.grow_grad2d, # GSs with image plane gradient above this value will be split/duplicated. Default is 0.0002.
+                grow_scale3d=training_args.grow_scale3d,# GSs with 3d scale (normalized by scene_scale) below this value will be duplicated. Above will be split. Default is 0.01.
+                grow_scale2d=training_args.grow_scale2d,# GSs with 2d scale (normalized by image resolution) above this value will be split. Default is 0.05.
+                prune_scale3d=training_args.prune_scale3d,# GSs with 3d scale (normalized by scene_scale) above this value will be pruned. Default is 0.1.
                 
                 # refine_scale2d_stop_iter=4000, # splatfacto behavior
                 refine_start_iter=training_args.densify_from_iter,
                 refine_stop_iter=training_args.densify_until_iter,
                 reset_every=training_args.opacity_reset_interval,
-                refine_every=training_args.densification_interval,
-                absgrad=False,
-                revised_opacity=False,
-                key_for_gradient="means2d",
-                
-            )
-            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
-            self.strategy_state = self.strategy.initialize_state(
-                    scene_scale=self.spatial_lr_scale
-            )
-        else:
-            self.strategy = MCMCStrategy(
-                cap_max=2_000_000,            # optional ceiling on splats
-                noise_lr=5e5,                 # strength of the random walk
-                refine_start_iter=500,
-                refine_stop_iter=training_args.densify_until_iter,
-                refine_every=training_args.densification_interval,
-                min_opacity=0.01,             # prune floor; match the rest of your pipeline
-                verbose=True
-            )
-            self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
-            self.strategy_state = self.strategy.initialize_state()
-
-        
-        
-    def training_setup(self, training_args):        
-        ##### Set-up GSplat optimizers #####
-        self.percent_dense = training_args.percent_dense
-        
-        if self.use_default_strategy:
-            self.strategy = DefaultStrategy(
-                verbose=True,
-                prune_opa=0.005,
-                grow_grad2d=0.0001,
-                grow_scale3d=0.01,
-                grow_scale2d=0.1,
-                
-                prune_scale3d=0.2,
-                
-                # refine_scale2d_stop_iter=4000, # splatfacto behavior
-                refine_start_iter=training_args.densify_from_iter,
-                refine_stop_iter=training_args.densify_until_iter,
-                reset_every=3000,#training_args.opacity_reset_interval,
                 refine_every=training_args.densification_interval,
                 absgrad=False,
                 revised_opacity=False,
