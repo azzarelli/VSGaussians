@@ -256,7 +256,6 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
     
     # Precompute point a,b,s texture indexing
     colors_final = []
-    colors_delta = []
     for texture, cam in zip(textures, viewpoint_camera):
         dir_pp = (means3D - cam.camera_center.cuda().repeat(colors.shape[0], 1))
         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
@@ -276,7 +275,6 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
         colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=2)
         color_d = tex_invariance*colors_ibl
         colors_final.append((colors_precomp + color_d).unsqueeze(0))
-        colors_delta.append(color_d.unsqueeze(0))
         
     colors_final = torch.cat(colors_final, dim=0)
     M = len(textures)
@@ -312,23 +310,8 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
             mode="RGB"
         )
         colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-        
-        colors_delta = torch.cat(colors_delta, dim=0)
-        color_delta, _, meta = rendering_pass(
-            means3D_final,
-            rotation_final, 
-            scales_final, 
-            opacity_final, 
-            colors_delta,
-            None, 
-            viewpoint_camera, 
-            None,
-            mode="RGB"
-        )
 
-        color_delta = color_delta.squeeze(1).permute(0, 3, 1, 2)
-
-        return colors_deform, colors_canon, color_delta, meta
+        return colors_deform, colors_canon, meta
     return colors_deform, meta
 
 
