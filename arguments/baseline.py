@@ -6,6 +6,5 @@ OptimizationParams = dict(
     dataloader=True,
     iterations=16000,
     
-    densify_from_iter = 100,
     densification_interval = 100,
 )
