@@ -104,7 +104,7 @@ class OptimizationParams(ParamGroup):
         # Regularization
         self.lambda_dssim = 0.2
         self.lambda_canon = 0.2
-        self.lambda_residual=0.2
+        self.lambda_residual=0.05
 
         # Densification
         self.prune_opa=0.005
