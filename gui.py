@@ -170,7 +170,7 @@ class GUI(GUIBase):
             id1 = int(cam.time*self.scene.maxframes)
             textures.append(self.scene.ibl[id1])
         
-        render,canon, info = render_extended(
+        render, canon, residuals_map, lambda_map, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
@@ -179,21 +179,28 @@ class GUI(GUIBase):
 
         self.gaussians.pre_backward(self.iteration, info)
 
+        # Fetch and load training data
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-        
         canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-
         gt_out = render_gt* masked_gt
         canon_out = canons_gt* masked_gt
+        
+        # Psuedo Deformation for residuals
+        # l.c + (1-l).dela_c, where c is ground trtuh
+        pseudo_render = lambda_map*canon_out + (1-lambda_map)*residuals_map
+        
         
         # Loss Functions
         deform_loss = l1_loss(render, gt_out)
         canon_loss = l1_loss(canon, canon_out)
+        residual_loss = l1_loss(pseudo_render, gt_out)
+
+        
         
         
         dssim = (1-ssim(render, gt_out))/2.
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss 
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + self.opt.lambda_residual* residual_loss
                    
         # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
@@ -202,6 +209,7 @@ class GUI(GUIBase):
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                 dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                dpg.set_value("_log_deform", f"residuals {residual_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             

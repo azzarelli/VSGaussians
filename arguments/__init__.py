@@ -104,13 +104,14 @@ class OptimizationParams(ParamGroup):
         # Regularization
         self.lambda_dssim = 0.2
         self.lambda_canon = 0.2
+        self.lambda_residual=0.0
 
         # Densification
         self.prune_opa=0.005
         self.grow_grad2d=0.0001
-        self.grow_scale3d=0.01
+        self.grow_scale3d=0.02
         self.grow_scale2d=0.1
-        self.prune_scale3d=0.2
+        self.prune_scale3d=0.1
         
         
         self.weight_constraint_init= 1

@@ -17,12 +17,12 @@ if [ "$3" == "view" ]; then
   echo "Viewing..."
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \
     --expname "$SAVEDIR/$EXP_NAME" \
-    --configs arguments/studio4.py \
+    --configs arguments/baseline.py \
     --start_checkpoint "$4" --view-test
 else
   echo "Training starting..."
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \
     --expname "$SAVEDIR/$EXP_NAME" \
-    --configs arguments/studio4.py \
+    --configs arguments/baseline.py \
     --test_iterations 2000
 fi

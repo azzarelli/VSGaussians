@@ -256,6 +256,8 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
     
     # Precompute point a,b,s texture indexing
     colors_final = []
+    lambda_final = []
+    residual_final = []
     for texture, cam in zip(textures, viewpoint_camera):
         dir_pp = (means3D - cam.camera_center.cuda().repeat(colors.shape[0], 1))
         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
@@ -274,6 +276,10 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
         
         colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=2)
         colors_final.append((tex_invariance*colors_precomp + (1.-tex_invariance)*colors_ibl).unsqueeze(0))
+
+        if return_canon:
+            lambda_final.append(tex_invariance.unsqueeze(0))
+            residual_final.append(colors_ibl.unsqueeze(0))
 
     colors_final = torch.cat(colors_final, dim=0)
     M = len(textures)
@@ -309,7 +315,38 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
             mode="RGB"
         )
         colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-        return colors_deform, colors_canon, meta
+        
+        residual_final = torch.cat(residual_final, dim=0)
+        lambda_final = torch.cat(lambda_final, dim=0)
+        
+        lamba_map, _, meta = rendering_pass(
+            means3D_final,
+            rotation_final, 
+            scales_final, 
+            opacity_final, 
+            lambda_final,
+            None, 
+            viewpoint_camera, 
+            None,
+            mode="RGB"
+        )
+        lamba_map = lamba_map.squeeze(1).permute(0, 3, 1, 2)
+        
+        residual_map, _, meta = rendering_pass(
+            means3D_final,
+            rotation_final, 
+            scales_final, 
+            opacity_final, 
+            residual_final,
+            None, 
+            viewpoint_camera, 
+            None,
+            mode="RGB"
+        )
+        residual_map = residual_map.squeeze(1).permute(0, 3, 1, 2)
+        
+ 
+        return colors_deform, colors_canon, residual_map, lamba_map, meta
     return colors_deform, meta
 
 
