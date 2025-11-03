@@ -70,7 +70,8 @@ class GUIBase:
             
 
     def __del__(self):
-        dpg.destroy_context()
+        if self.gui:
+            dpg.destroy_context()
 
     def track_cpu_gpu_usage(self, time):
         # Print GPU and CPU memory usage
@@ -273,7 +274,6 @@ class GUIBase:
                         test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
                         with open(test_fp, "w") as outfile:
                             json.dump(datasets, outfile, indent=4, ensure_ascii=False)
-                        print(datasets)
                         
                     # Update iteration
                     self.iteration += 1
