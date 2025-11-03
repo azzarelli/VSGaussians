@@ -96,7 +96,7 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         
         # Relighting learning parameters
-        self.lambda_lr = 0.005
+        self.lambda_lr = 0.0075
         self.tex_mu_lr = 0.005
         self.tex_s_lr = 0.0005
 
@@ -109,9 +109,9 @@ class OptimizationParams(ParamGroup):
         # Densification
         self.prune_opa=0.005
         self.grow_grad2d=0.0001
-        self.grow_scale3d=0.01
+        self.grow_scale3d=0.02
         self.grow_scale2d=0.1
-        self.prune_scale3d=0.2
+        self.prune_scale3d=0.1
         
         
         self.weight_constraint_init= 1
