@@ -121,7 +121,7 @@ class OptimizationParams(ParamGroup):
         self.weight_decay_iteration = 5000
         
         self.opacity_reset_interval = 3000
-        self.densification_interval = 100
+        self.densification_interval = 500
         
         self.densify_from_iter = 3000
         self.densify_until_iter = 12_000

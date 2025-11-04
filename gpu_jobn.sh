@@ -25,4 +25,4 @@ echo "  EXP_NAME: $EXP_NAME"
 python gui.py -s "$SAVEDIR" \
   --expname "$SAVEDIR/$EXP_NAME" \
   --configs "arguments/$ARGS" \
-  --test_iterations 4000
+  --test_iterations 2000
