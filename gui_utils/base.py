@@ -320,6 +320,7 @@ class GUIBase:
                         "stage":self.stage,
                         "finecoarse_flag":self.finecoarse_flag
                     },
+                    mip_level=self.opt.mip_level
             )
 
             try:

@@ -87,8 +87,10 @@ class OptimizationParams(ParamGroup):
         self.zerostamp_init=False
         self.custom_sampler=None
         self.iterations = 30_000
+        
+        self.mip_level = 2
+        
         self.position_lr_init = 0.00016
-
         # 3DGS/2DGS learning parameters
         self.feature_lr = 0.001
         self.opacity_lr = 0.01

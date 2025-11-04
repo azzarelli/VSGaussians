@@ -174,7 +174,8 @@ class GUI(GUIBase):
             viewpoint_cams, 
             self.gaussians,
             textures,
-            return_canon=True
+            return_canon=True,
+            mip_level=self.opt.mip_level
         )
 
         self.gaussians.pre_backward(self.iteration, info)
@@ -225,6 +226,7 @@ class GUI(GUIBase):
             [viewpoint_cams], 
             self.gaussians,
             [texture],
+            mip_level=self.opt.mip_level
         )
         
         # Process data
@@ -261,7 +263,9 @@ class GUI(GUIBase):
         _, relit, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
-            [texture],return_canon=True
+            [texture],
+            return_canon=True,
+            mip_level=self.opt.mip_level
         )
         
         # Process data

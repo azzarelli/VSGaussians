@@ -156,7 +156,7 @@ SIGNS = torch.tensor([[1, 1],
 
 
 @torch.no_grad
-def render(viewpoint_camera, pc, abc, texture, view_args=None):
+def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
     """
     Render the scene for viewing
     """
@@ -237,14 +237,14 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None):
             render = render.squeeze(0).permute(2,0,1)
         
     else:
-        render, _ = render_extended([viewpoint_camera], pc, [texture])
+        render, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
         render = render.squeeze(0)
     return {
         "render": render,
         "extras":extras # A dict containing mor point info
         }
 
-def render_extended(viewpoint_camera, pc, textures, return_canon=False):
+def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2):
     """Fine/Deformation function
 
     Notes:
@@ -272,7 +272,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False):
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=2)
+        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=mip_level)
         color_d = tex_invariance*colors_ibl
         colors_final.append((colors_precomp + color_d).unsqueeze(0))
         
@@ -360,11 +360,7 @@ def sample_mipmap(I, uv, s, num_levels=3):
     """
     N = s.size(0)
     # 1. Generate mipmaps
-    maps = I.unsqueeze(0) # F.interpolate(
-    #     I.unsqueeze(0), scale_factor=0.5,
-    #     mode='bilinear', align_corners=False,
-    #     recompute_scale_factor=True
-    # ) # shaped list: 1,3,h,w where h,w, are the downsampled height and width per level
+    maps = generate_mipmaps(I, num_levels=num_levels)
     
     # Normalize us -1, 1 (from 0, 1)
     uv = 2.*uv -1.
@@ -372,6 +368,26 @@ def sample_mipmap(I, uv, s, num_levels=3):
     
     # Scaling mip-maps
 
-    mip_samples = F.grid_sample(maps, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
-    return mip_samples
+    L = s*(num_levels-1.)
+    lower = torch.floor(L).long().clamp(max=num_levels-1)
+    upper = torch.clamp(lower + 1, max=num_levels-1)
+    s_interp = (L - lower.float())
+
+    # Initialize mipmap samples
+    mip_samples = torch.empty((N, num_levels, 3), device=s.device)    
+
+    # For each map sample using u,v and store the values in samples
+    for idx, map in enumerate(maps):
+        # map is (1, 3, h, w)
+        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
+
+    gather_idx_low  = lower.view(N, 1, 1).expand(-1, 1, 3)
+    gather_idx_high = upper.view(N, 1, 1).expand(-1, 1, 3)
+    colors_low  = torch.gather(mip_samples, 1, gather_idx_low).squeeze(1)   # [N,3]
+    colors_high = torch.gather(mip_samples, 1, gather_idx_high).squeeze(1) 
+    
+    colors = (1. - s_interp) * colors_low + s_interp * colors_high
+
+    return colors
+
     
