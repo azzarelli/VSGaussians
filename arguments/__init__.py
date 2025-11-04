@@ -102,11 +102,12 @@ class OptimizationParams(ParamGroup):
         self.tex_mu_lr = 0.005
         self.tex_s_lr = 0.0005
 
-
         # Regularization
         self.lambda_dssim = 0.2
         self.lambda_canon = 0.2
         self.lambda_residual=0.0
+        self.lambda_scaling=0.2
+
 
         # Densification
         self.prune_opa=0.005

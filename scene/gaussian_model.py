@@ -443,8 +443,10 @@ class GaussianModel:
             ab_dc = template_sh0[:, :2, :] + 0.5 # Centre of mipmap
             ab_extra = template_shN[:, :2, :]
             
-            texscale = torch.zeros_like(torch.tensor(opacities, dtype=torch.float)) + 0.0 # bias towards the low res image
-        
+            texscale = torch.zeros_like(torch.tensor(opacities, dtype=torch.float)) # bias towards the low res image
+            texscale = texscale + 0.01*torch.rand_like(texscale)
+            texscale = torch.logit(texscale)
+
         mean_foreground = means.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(means - mean_foreground, dim=1)
         self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy() /2.

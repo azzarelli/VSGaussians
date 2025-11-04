@@ -20,7 +20,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams, ModelHidd
 from torch.utils.data import DataLoader
 from utils.timer import Timer
 
-from utils.loss_utils import l1_loss, ssim
+from utils.loss_utils import l1_loss, ssim, l2_loss
 from utils.image_utils import psnr, mse, rgb_to_ycbcr
 from gaussian_renderer import render_extended
 
@@ -186,22 +186,31 @@ class GUI(GUIBase):
         canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         gt_out = render_gt* masked_gt
         canon_out = canons_gt* masked_gt
-        delta_out = canon_out - gt_out
         
         # Loss Functions
         deform_loss = l1_loss(render, gt_out)
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss
+        scales3d = self.gaussians.get_scaling.prod(-1).unsqueeze(-1) # N,1 - cubic volume of gaussian splat
+        scalesUV = 2**(self.gaussians.get_texscale* self.opt.mip_level) # N,3 # 0 to 1 * mip_level # square pixel density based on inputs
+
+
+        scales3d_min = scales3d.min()
+        scales3d = (scales3d - scales3d_min) / (scales3d.max() - scales3d_min)
+        scalesUV_min = scalesUV.min()
+        scalesUV = (scalesUV - scalesUV_min) / (scalesUV.max() - scalesUV_min)
+        scale_loss = l2_loss(scalesUV, scales3d)
+
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + self.opt.lambda_scaling * scale_loss
                    
-        # print( planeloss ,depthloss,hopacloss ,wopacloss ,normloss ,pg_loss,covloss)
         with torch.no_grad():
             if self.gui:
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                 dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                dpg.set_value("_log_deform", f"scale {scale_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
