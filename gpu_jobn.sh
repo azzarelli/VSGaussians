@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=test_run
-#SBATCH --output=test_run.out
+#SBATCH --job-name=baseline
+#SBATCH --output=baseline.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=00:01:00
@@ -14,7 +14,7 @@ conda activate vsenv
 
 SAVEDIR=$HOME/data/studio4-1/
 
-ARGS="studio4.py"
+ARGS="baseline.py"
 EXP_NAME="baseline"
 
 
