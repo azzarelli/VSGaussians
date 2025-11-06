@@ -442,7 +442,7 @@ class GaussianModel:
             template_sh0 = torch.zeros_like(torch.tensor(features_dc, dtype=torch.float))
             template_shN = torch.zeros_like(torch.tensor(features_extra, dtype=torch.float))
             
-            lambda_dc = template_sh0[:, :1, :] + 1.0 # bias towards object color
+            lambda_dc = template_sh0[:, :1, :] + 0.01
             lambda_extra = template_shN[:, :1, :]
             
             ab_dc = template_sh0[:, :2, :] + 0.5 # Centre of mipmap

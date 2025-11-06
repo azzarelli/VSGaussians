@@ -328,7 +328,10 @@ class GUIBase:
             cam = self.free_cams[self.current_cam_index]
             cam.time = self.time
             
-            abc = self.abc.abc
+            try:
+                abc = self.abc.abc
+            except:
+                abc = None
             id1 = int(self.time*99)
             texture = self.scene.ibl[id1].cuda()
             
