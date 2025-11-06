@@ -52,9 +52,12 @@ class Scene:
         self.video_camera = FourDGSdataset(scene_info.video_cameras, "video")
         
         self.ibl = IBLBackround(scene_info.background_pth_ids)
-                
+
+   
         if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
+            # Initialize the settings for doing bundle adjustment on IBL screen
+            self.ba_background_path = scene_info.ba_background_fp
 
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                         "point_cloud",
@@ -66,6 +69,8 @@ class Scene:
                                                     "iteration_" + str(self.loaded_iter),
                                                 ))
         else:
+            self.ba_background_path = None
+
             if scene_info.param_path is not None:
                 self.gaussians.load_ply(
                     scene_info.param_path,

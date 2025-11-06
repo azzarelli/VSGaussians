@@ -43,6 +43,7 @@ class SceneInfo(NamedTuple):
     train_cameras: list
     test_cameras:list
     video_cameras: list
+    ba_background_fp:str
     nerf_normalization: dict
     background_pth_ids:list
     param_path:str
@@ -461,6 +462,7 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     V_test_idx_set = [(V_cam*100)+i for i in range(100) if i not in L_test_idx_set] # The novel-view only test set
     LV_test_idx_set = [(V_cam*100)+i for i in range(100) if i in L_test_idx_set] # The novel-view & novel lighting test set
     
+    # Load the split datasets
     L_test_cams = [cam for idx, cam in enumerate(cam_infos)  if (idx % L) in L_test_idx_set and idx not in LV_test_idx_set] # For indexs n the lighting test set
     V_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in V_test_idx_set] # For indexs in the novel view test set
     LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
@@ -468,9 +470,11 @@ def readNerfstudioInfo(path, N=98, downsample=2):
 
     relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
     
+    # Select cameras with a common background for pose estimation (from the training set)
+    selected_background_fp = relighting_cams[0].b_path
+
+    # Camera path for novel view
     video_cams = generate_circular_cams(path, cam_infos[V_cam*100])
-    
-    
     nerf_normalization = getNerfppNorm(relighting_cams)
     
     
@@ -478,6 +482,8 @@ def readNerfstudioInfo(path, N=98, downsample=2):
         train_cameras=relighting_cams,
         test_cameras=test_cams,
         video_cameras=video_cams,
+        
+        ba_background_fp=selected_background_fp,
         
         nerf_normalization=nerf_normalization,
         background_pth_ids=background_paths,

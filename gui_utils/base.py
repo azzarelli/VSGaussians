@@ -9,7 +9,7 @@ import os
 import copy
 import psutil
 import torch
-from gaussian_renderer import render
+from gaussian_renderer import render, render_IBL_source
 from tqdm import tqdm
 import time
 import json
@@ -56,13 +56,21 @@ class GUIBase:
         self.switch_off_viewer_args = False
         self.full_opacity = False
         
-        self.N_pseudo = 3 
-        self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
+        # Rendering/Novel View Settings
+        self.render_novel_view = False
+        self.novel_view_background_dir = ""
+        self.ba_mask_flag = False
+        self.trainable_abc = None
         
+        # Analysis/Inspection tools
+        self.mous_loc = [0, 0] # x,y
+
+        # Viewer settings for camera/view selection
+        self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         
-        self.trainable_abc = None
+        
         if self.gui:
             print('DPG loading ...')
             dpg.create_context()
@@ -85,8 +93,8 @@ class GUIBase:
             f'[{self.stage} {self.iteration}] Time: {time:.2f} | Allocated Memory: {allocated:.2f} MB, Reserved Memory: {reserved:.2f} MB | CPU Memory Usage: {memory_mb:.2f} MB')
     
     def render(self):
-        self.switch_off_viewer = True            
-
+        self.switch_off_viewer = False            
+        cnt = 0
         if self.gui:
             while dpg.is_dearpygui_running():
                 if self.view_test == False:
@@ -190,7 +198,28 @@ class GUIBase:
                     # Update iteration
                     self.iteration += 1
 
+                elif cnt ==0:
+                    self.initialize_abc()
+                    cnt = 1
+                # if self.ba_mask_flag:
+                #     self.bundle_adjust_masks()
+                #     self.ba_mask_flag = False
+                # if self.render_novel_view:
+                #     if self.novel_view_background_dir != "" and os.path.exists(self.novel_view_background_dir):
+                #         nv_background_fp = [os.path.join(self.novel_view_background_dir, fp) for fp in os.listdir(self.novel_view_background_dir) if 'jpg' or 'png' in fp]
+                #         with torch.no_grad():
+                #             view_size=len(self.scene.video_camera)
+                #             for i, backgroundfp in enumerate(nv_background_fp):
+                #                 # Static video camera
+                #                 texture = self.scene.load_custom_image(backgroundfp)
 
+                #                 metric_results = self.video_custom_step(self.scene.test_camera[0],texture, i)
+                #                 self.viewer_step()
+                #                 dpg.render_dearpygui_frame()
+                #     else:
+                #         print(f"Input {self.novel_view_background_dir} does not exist")
+                        
+                        
                 with torch.no_grad():
                     self.viewer_step()
                     dpg.render_dearpygui_frame()    
@@ -285,30 +314,23 @@ class GUIBase:
                         self.track_cpu_gpu_usage(0.1)
                         
                     # Save scene when at the saving iteration
-                    # if self.stage == 'fine' and (self.iteration == self.final_iter-1):
-                    #     self.save_scene()
+                    if self.stage == 'fine' and (self.iteration == self.final_iter-1):
+                        self.save_scene()
 
                     self.timer.start()
                      
     @torch.no_grad()
     def viewer_step(self):
         t0 = time.time()
+        mous_hover_value = [0.]
         if self.switch_off_viewer == False:
 
             cam = self.free_cams[self.current_cam_index]
             cam.time = self.time
             
-            
-            if self.trainable_abc is None:
-                abc = self.scene.ibl.abc.cuda()
-                
-                id1 = int(self.time*99)
-                texture = self.scene.ibl[id1].cuda()
-
-            else:
-                abc = self.trainable_abc()
-                texture = self.trainable_abc.background_texture
-                
+            abc = self.abc.abc
+            id1 = int(self.time*99)
+            texture = self.scene.ibl[id1].cuda()
             
             buffer_image = render(
                     cam,
@@ -332,8 +354,11 @@ class GUIBase:
             # if buffer_image.shape[0] == 1:
             #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
             #     buffer_image = buffer_image.repeat(3,1,1)
-
-
+            try:# 
+                mous_hover_value = buffer_image[:, self.mous_loc[1], self.mous_loc[0]]
+            except:
+                mous_hover_value = [0.]
+            
             buffer_image = torch.nn.functional.interpolate(
                 buffer_image.unsqueeze(0),
                 size=(self.H,self.W),
@@ -368,11 +393,30 @@ class GUIBase:
             "_texture", buffer_image
         )  # buffer must be contiguous, else seg fault!
         
+        dpg.set_value("_log_mouse_value", f"({[f'{v:.4f}' for v in mous_hover_value]})")
+
         # Add _log_view_camera
         dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")
         if 1./(t1-t0) < 500:
             dpg.set_value("_log_infer_time", f"{1./(t1-t0)} ")
-        
+    
+    @torch.no_grad()
+    def initialize_abc(self):
+        import torch
+        from scene.dataset import ABC
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+        # Initialize ABC
+        # TL, TR, BL
+        init = torch.tensor([[-0.152, 0.73, 0.174],
+                             [0.461, 0.50, 0.18],
+                             [-0.126, 0.79, -0.18]])
+        print(f"Texture ABC : {init}")
+        self.abc = ABC(init.cuda())
+
+
 
     def save_scene(self):
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))
@@ -479,7 +523,7 @@ class GUIBase:
             # ----------------
             #  Control Functions
             # ----------------
-            with dpg.collapsing_header(label="Rendering", default_open=True):
+            with dpg.collapsing_header(label="Viewer Config", default_open=True):
                 def callback_toggle_show_rgb(sender):
                     self.switch_off_viewer = ~self.switch_off_viewer
                 def callback_toggle_finecoarse(sender):
@@ -508,10 +552,10 @@ class GUIBase:
                     for i in range(len(self.free_cams)):
                         self.free_cams[i] = copy.deepcopy(self.original_cams[i])
                     self.current_cam_index = 0
-            
+                
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Reset Fov", callback=callback_toggle_reset_cam)
-                    
+                
                 def callback_toggle_sceneocc_mask(sender):
                     self.show_mask = 'occ'
                 def callback_toggle_no_mask(sender):
@@ -533,8 +577,8 @@ class GUIBase:
                     self.vis_mode = '2D'
                 def callback_toggle_show_norms(sender):
                     self.vis_mode = 'normals'
-                def callback_toggle_show_alpha(sender):
-                    self.vis_mode = 'alpha'
+                def callback_toggle_show_XYZ(sender):
+                    self.vis_mode = 'xyz'
                 def callback_toggle_show_invariance(sender):
                     self.vis_mode = 'invariance'
                 def callback_toggle_show_deform(sender):
@@ -543,7 +587,6 @@ class GUIBase:
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
                     # dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
-                    # dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
                     dpg.add_button(label="Invar", callback=callback_toggle_show_invariance)
                     dpg.add_button(label="Deform", callback=callback_toggle_show_deform)
                 
@@ -551,6 +594,8 @@ class GUIBase:
                     dpg.add_button(label="D", callback=callback_toggle_show_depth)
                     dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="2D", callback=callback_toggle_show_2dgsdepth)
+                    dpg.add_button(label="XYZ", callback=callback_toggle_show_XYZ)
+
                 
                 def callback_speed_control(sender):
                     self.time = dpg.get_value(sender)
@@ -562,7 +607,63 @@ class GUIBase:
                     min_value=0.,
                     callback=callback_speed_control,
                 )
-                
+            
+            if self.view_test:
+                with dpg.collapsing_header(label="Rendering Processing", default_open=True):
+                    def on_text_change(sender, app_data, user_data):
+                        self.novel_view_background_dir = app_data
+                    def callback_toggle_render_novel_view(sender):
+                        self.render_novel_view = ~ self.render_novel_view
+                    def callback_activate_run_ba_mask(sender):
+                        self.ba_mask_flag = ~ self.ba_mask_flag
+
+                    input_size_xyz = 40
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Run IBL Posing (bundle adj.)" , callback=callback_activate_run_ba_mask)
+
+                    def on_text_change_ax(sender, app_data, user_data):
+                        self.abc.abc[0,0] = float(app_data)
+                    def on_text_change_ay(sender, app_data, user_data):
+                        self.abc.abc[0,1] = float(app_data)
+                    def on_text_change_az(sender, app_data, user_data):
+                        self.abc.abc[0,2] = float(app_data)
+                    with dpg.group(horizontal=True):
+                        dpg.add_text("Top-Left : ")
+                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_ax)
+                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_ay)
+                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_az)
+
+                    def on_text_change_bx(sender, app_data, user_data):
+                        self.abc.abc[1,0] = float(app_data)
+                    def on_text_change_by(sender, app_data, user_data):
+                        self.abc.abc[1,1] = float(app_data)
+                    def on_text_change_bz(sender, app_data, user_data):
+                        self.abc.abc[1,2] = float(app_data)
+                    with dpg.group(horizontal=True):
+                        dpg.add_text("Top-Righ : ")
+                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_bx)
+                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_by)
+                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_bz)
+                    
+                    def on_text_change_cx(sender, app_data, user_data):
+                        self.abc.abc[2,0] = float(app_data)
+                    def on_text_change_cy(sender, app_data, user_data):
+                        self.abc.abc[2,1] = float(app_data)
+                    def on_text_change_cz(sender, app_data, user_data):
+                        self.abc.abc[2,2] = float(app_data)
+                    with dpg.group(horizontal=True):
+                        dpg.add_text("Bot-Left : ")
+                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_cx)
+                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_cy)
+                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_cz)
+                        
+                        
+                    with dpg.group(horizontal=True):
+                        dpg.add_text("background fp : ")
+                        dpg.add_input_text(callback=on_text_change)
+                    
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Render Novel View" , callback=callback_toggle_render_novel_view)
         
         def zoom_callback_fov(sender, app_data):
             delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
@@ -573,8 +674,8 @@ class GUIBase:
             # Scale FoV within limits
             cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
             cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
+            cam.update_K()
 
-        
 
         def drag_callback(sender, app_data):
             # app_data = (button, rel_x, rel_y)
@@ -590,38 +691,55 @@ class GUIBase:
             
             cam = self.free_cams[self.current_cam_index]
 
+            if not hasattr(cam, "yaw"): cam.yaw = 0.0
+            if not hasattr(cam, "pitch"): cam.pitch = 0.0
+    
             # Sensitivity
-            yaw_speed = -0.0001
+            yaw_speed = 0.0001
             pitch_speed = 0.0001
 
-            # Convert mouse drag into yaw/pitch rotations
-            yaw = rel_x * yaw_speed
-            pitch = rel_y * pitch_speed
+            cam.yaw = -rel_x * yaw_speed
+            cam.pitch = -rel_y * pitch_speed
+            cam.pitch = np.clip(cam.pitch, -np.pi/2 + 0.01, np.pi/2 - 0.01)  # avoid flip
 
-            # --- Rotation Matrices ---
+            # --- Rebuild rotation matrix from angles ---
+            cy, sy = np.cos(cam.yaw), np.sin(cam.yaw)
+            cp, sp = np.cos(cam.pitch), np.sin(cam.pitch)
+
+            # Yaw (around world Y), Pitch (around local X)
             Ry = np.array([
-                [np.cos(yaw), 0, np.sin(yaw)],
+                [cy, 0, sy],
                 [0, 1, 0],
-                [-np.sin(yaw), 0, np.cos(yaw)]
-            ])
+                [-sy, 0, cy]
+            ], dtype=np.float32)
 
             Rx = np.array([
                 [1, 0, 0],
-                [0, np.cos(pitch), -np.sin(pitch)],
-                [0, np.sin(pitch), np.cos(pitch)]
-            ])
+                [0, cp, -sp],
+                [0, sp, cp]
+            ], dtype=np.float32)
 
-            R_drag = Rx @ Ry
+            cam.R = cam.R @ Ry @ Rx 
+        
+        def mouse_hover_callback(sender, app_data):
+            # app_data: (x, y) coordinates of mouse position in global viewport
+            x, y = app_data
 
-            R_c2w = cam.R
+            if dpg.is_item_hovered("_primary_window"):
+                self.mous_loc = [int(x),int(y)]
+                dpg.set_value("_log_mouse_xy", f"({x:.1f}, {y:.1f})")
 
-            R_c2w_new = R_drag @ R_c2w
+        # Add text in the control window to display mouse coordinates
+        with dpg.group(horizontal=True, parent="_control_window"):
+            dpg.add_text("Mouse Pos ")
+            dpg.add_text("N/A", tag="_log_mouse_xy")
+        with dpg.group(horizontal=True, parent="_control_window"):
+            dpg.add_text("N/A", tag="_log_mouse_value")
             
-            cam.R = R_c2w_new
-                
         with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=zoom_callback_fov)
             dpg.add_mouse_drag_handler(callback=drag_callback)
+            dpg.add_mouse_move_handler(callback=mouse_hover_callback)
             
             
         dpg.create_viewport(
@@ -655,6 +773,26 @@ class GUIBase:
         dpg.show_viewport()
         
 from scipy.ndimage import distance_transform_edt
+
+def get_viewmat(optimized_camera_to_world):
+    """
+    function that converts c2w to gsplat world2camera matrix, using compile for some speed
+    """
+    R = optimized_camera_to_world[:, :3, :3]  # 3 x 3
+    T = optimized_camera_to_world[:, :3, 3:4]  # 3 x 1
+    # flip the z and y axes to align with gsplat conventions
+    R = R * torch.tensor([[[1, -1, -1]]], device=R.device, dtype=R.dtype)
+    # analytic matrix inverse to get world2camera matrix
+    R_inv = R.transpose(1, 2)
+    T_inv = -torch.bmm(R_inv, T)
+    viewmat = torch.zeros(R.shape[0], 4, 4, device=R.device, dtype=R.dtype)
+    viewmat[:, 3, 3] = 1.0  # homogenous
+    viewmat[:, :3, :3] = R_inv
+    viewmat[:, :3, 3:4] = T_inv
+    return viewmat
+
+from scipy.ndimage import distance_transform_edt
+@torch.no_grad()
 def get_in_view_dyn_mask(camera, xyz, X, Y) -> torch.Tensor:
     device = xyz.device
     N = xyz.shape[0]
@@ -662,68 +800,69 @@ def get_in_view_dyn_mask(camera, xyz, X, Y) -> torch.Tensor:
     # Convert to homogeneous coordinates
     xyz_h = torch.cat([xyz, torch.ones((N, 1), device=device)], dim=-1)  # (N, 4)
 
-    # Apply full projection (world → clip space)
-    proj_xyz = xyz_h @ camera.full_proj_transform.to(device)  # (N, 4)
+    # World → Camera (OpenCV convention: +Z forward)
+    c2w = camera.pose
+    w2c = get_viewmat(c2w[None])[0]
+    xyz_cam = (xyz_h @ w2c.T)[:, :3]
 
-    # Homogeneous divide to get NDC coordinates
-    ndc = proj_xyz[:, :3] / proj_xyz[:, 3:4]  # (N, 3)
+    # Only keep points in front of the camera
+    in_front = xyz_cam[:, 2] > 0
 
-    # Visibility check
-    in_front = proj_xyz[:, 2] > 0
-    in_ndc_bounds = (
-        (ndc[:, 0].abs() <= 1) &
-        (ndc[:, 1].abs() <= 1) &
-        (ndc[:, 2].abs() <= 1)
+    # Camera → Pixel (using intrinsics)
+    K = torch.from_numpy(camera.K).to(device=device, dtype=torch.float32)
+    xy = xyz_cam @ K.T  # (N, 3)
+    px = (xy[:, 0] / xy[:, 2]).long()
+    py = (xy[:, 1] / xy[:, 2]).long()
+
+    # Visibility check (inside image bounds)
+    in_bounds = (
+        (px >= 0) & (px < camera.image_width) &
+        (py >= 0) & (py < camera.image_height)
     )
-    visible_mask = in_ndc_bounds & in_front
+    visible_mask = in_front & in_bounds
 
-    # Compute pixel coordinates
-    px = (((ndc[:, 0] + 1) / 2) * camera.image_width).long()
-    py = (((ndc[:, 1] + 1) / 2) * camera.image_height).long()
-
-    # Only sample pixels for visible points
+    # Valid pixel indices
     valid_idx = visible_mask.nonzero(as_tuple=True)[0]
-    px_valid = px[valid_idx].clamp(0, camera.image_width - 1)
-    py_valid = py[valid_idx].clamp(0, camera.image_height - 1)
-    mask = (1.-camera.scene_mask).to(device).squeeze(0)
+    if len(valid_idx) == 0:
+        print("No visible points found.")
+        return torch.zeros((camera.image_height, camera.image_width, 3), device=device)
 
-    sampled_mask = mask[py_valid, px_valid].bool()
+    px_valid = px[valid_idx]
+    py_valid = py[valid_idx]
 
+    # Scene occlusion mask (optional)
+    mask = (1. - camera.sceneoccluded_mask).to(device).squeeze(0)
+
+    sampled_mask = mask[py_valid, px_valid] > 0.5
+
+    # Projected XYZ image
     H, W = camera.image_height, camera.image_width
     xyz_img = torch.zeros((H, W, 3), device=device)
 
-    # Assign xyz into pixels
     px_final = px_valid[sampled_mask]
     py_final = py_valid[sampled_mask]
     xyz_vals = xyz[valid_idx][sampled_mask]
     xyz_img[py_final, px_final] = xyz_vals
-    
-    
+
+    # Visualization (optional)
     show = False
     if show:
         import matplotlib.pyplot as plt
-        # Convert to CPU numpy for visualization
         img_np = xyz_img.detach().cpu().numpy()
-
-        # Normalize for display (independently per channel)
-        img_min = img_np.min(axis=(0, 1), keepdims=True)
-        img_max = img_np.max(axis=(0, 1), keepdims=True)
-        img_norm = (img_np - img_min) / (img_max - img_min + 1e-8)
 
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 
-        # Show normalized xyz image
-        ax[0].imshow(img_norm)
-        ax[0].set_title("Normalized xyz image")
+        ax[0].imshow(img_np)
+        ax[0].set_title("Projected XYZ (OpenCV)")
         ax[0].axis("off")
 
-        # Show XY indexing (scatter)
-        ax[1].imshow(img_norm)
+        ax[1].imshow(img_np)
         ax[1].scatter(X, Y, s=3, c="red")
         ax[1].set_title("With XY indexing")
         ax[1].axis("off")
 
         plt.show()
+        exit()
         return None
     
     # --- Nearest-neighbor fill for empty pixels ---
@@ -767,6 +906,7 @@ def get_in_view_dyn_mask(camera, xyz, X, Y) -> torch.Tensor:
         ax.legend()
 
         plt.show()
+        exit()
 
     return torch.from_numpy(point).float().to(device)
 

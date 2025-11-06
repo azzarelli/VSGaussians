@@ -74,12 +74,12 @@ class IBLBackround(Dataset):
     ):
         self.dataset = dataset
         self.transform = T.ToTensor()
-        self.abc = torch.rand(3,3)
-        
-    def update_abc(self, abc):
-        self.abc = abc.detach()
 
-
+    def load_custom_image(self, img_path):
+        image = self.transform(
+            Image.open(img_path).convert("RGB")
+        )
+        return image
         
     def __getitem__(self, index):
         image = self.transform(
@@ -90,3 +90,9 @@ class IBLBackround(Dataset):
     def __len__(self):
         
         return len(self.dataset)
+
+import torch.nn as nn
+class ABC:
+    def __init__(self, abc):
+        self.abc = abc
+    

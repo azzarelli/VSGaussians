@@ -192,15 +192,15 @@ class GUI(GUIBase):
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        scales3d = self.gaussians.get_scaling.prod(-1).unsqueeze(-1) # N,1 - cubic volume of gaussian splat
-        scalesUV = 2**(self.gaussians.get_texscale* self.opt.mip_level) # N,3 # 0 to 1 * mip_level # square pixel density based on inputs
+        # scales3d = self.gaussians.get_scaling.prod(-1).unsqueeze(-1) # N,1 - cubic volume of gaussian splat
+        # scalesUV = 2**(self.gaussians.get_texscale* self.opt.mip_level) # N,3 # 0 to 1 * mip_level # square pixel density based on inputs
 
 
-        scales3d_min = scales3d.min()
-        scales3d = (scales3d - scales3d_min) / (scales3d.max() - scales3d_min)
-        scalesUV_min = scalesUV.min()
-        scalesUV = (scalesUV - scalesUV_min) / (scalesUV.max() - scalesUV_min)
-        scale_loss = l2_loss(scalesUV, scales3d)
+        # scales3d_min = scales3d.min()
+        # scales3d = (scales3d - scales3d_min) / (scales3d.max() - scales3d_min)
+        # scalesUV_min = scalesUV.min()
+        # scalesUV = (scalesUV - scalesUV_min) / (scalesUV.max() - scalesUV_min)
+        scale_loss = 0. #l2_loss(scalesUV, scales3d)
 
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + self.opt.lambda_scaling * scale_loss
                    
@@ -210,7 +210,7 @@ class GUI(GUIBase):
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                 dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
-                dpg.set_value("_log_deform", f"scale {scale_loss.item():.5f}")
+                # dpg.set_value("_log_deform", f"scale {scale_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
@@ -247,9 +247,9 @@ class GUI(GUIBase):
         gt_out = gt_img * mask
 
         # Save image
-        # if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
-        #     save_im = mask*relit + (1.-mask)*gt_img
-        #     vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
+            save_im = mask*relit + (1.-mask)*gt_img
+            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
 
         
         gt_ycc = rgb_to_ycbcr(gt_out).squeeze(0)
@@ -277,6 +277,34 @@ class GUI(GUIBase):
             mip_level=self.opt.mip_level
         )
         
+        # Process data
+        relit = relit.squeeze(0)
+        
+        vutils.save_image(relit, os.path.join(self.save_videos, f"{index:05}.jpg"))
+        
+    @torch.no_grad
+    def video_custom_step(self, viewpoint_cams, texture, index):
+        # Sample the background image
+        texture = texture.cuda()
+        # Rendering pass
+        _, relit, _ = render_extended(
+            [viewpoint_cams], 
+            self.gaussians,
+            [texture],
+            return_canon=True,
+            mip_level=self.opt.mip_level
+        )
+            # Process data
+        relit = relit.squeeze(0)
+
+        mask = viewpoint_cams.sceneoccluded_mask.cuda()
+        gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
+        
+        # Save image
+        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
+            save_im = mask*relit + (1.-mask)*gt_img
+            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+
         # Process data
         relit = relit.squeeze(0)
         

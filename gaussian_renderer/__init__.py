@@ -28,25 +28,6 @@ def process_Gaussians_triplane(pc):
         
     return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
 
-
-# @torch_compile()
-def get_viewmat(optimized_camera_to_world):
-    """
-    function that converts c2w to gsplat world2camera matrix, using compile for some speed
-    """
-    R = optimized_camera_to_world[:, :3, :3]  # 3 x 3
-    T = optimized_camera_to_world[:, :3, 3:4]  # 3 x 1
-    # flip the z and y axes to align with gsplat conventions
-    R = R * torch.tensor([[[1, -1, -1]]], device=R.device, dtype=R.dtype)
-    # analytic matrix inverse to get world2camera matrix
-    R_inv = R.transpose(1, 2)
-    T_inv = -torch.bmm(R_inv, T)
-    viewmat = torch.zeros(R.shape[0], 4, 4, device=R.device, dtype=R.dtype)
-    viewmat[:, 3, 3] = 1.0  # homogenous
-    viewmat[:, :3, :3] = R_inv
-    viewmat[:, :3, 3:4] = T_inv
-    return viewmat
-
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
         gmode = 'RGB+D'
@@ -62,9 +43,8 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         w2c = []
         for c in cam:
             intr.append(c.intrinsics.unsqueeze(0))
-            c2w = c.pose
             
-            viewmat = get_viewmat(c2w.unsqueeze(0))
+            viewmat = c.w2c.unsqueeze(0)
             w2c.append(viewmat)
             
         intr = torch.cat(intr, dim=0)
@@ -76,8 +56,7 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
             w2c = w2c.unsqueeze(1)
     except:
         intr = cam.intrinsics.unsqueeze(0)
-        c2w = cam.pose
-        viewmat = get_viewmat(c2w.unsqueeze(0))
+        viewmat = cam.w2c.unsqueeze(0)
         w2c = viewmat
         width = cam.image_width
         height = cam.image_height
@@ -102,10 +81,44 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
     )
         
     return colors, alphas, meta
+import torch.nn.functional as F
+
+@torch.no_grad()
+def make_cam_rays(camera):
+    """Generate pixel-center camera rays in world space using the same intrinsics as gsplat."""
+    H, W = camera.image_height, camera.image_width
+    device = camera.device
+
+    # Use the same intrinsics as gsplat (camera.K from getOptimalNewCameraMatrix)
+    K = camera.intrinsics.to(device)
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+
+    # Pixel-center coordinates
+    xs = torch.arange(W, device=device, dtype=torch.float32) + 0.5
+    ys = torch.arange(H, device=device, dtype=torch.float32) + 0.5
+    jj, ii = torch.meshgrid(ys, xs, indexing="ij")  # [H,W]
+
+    x = (ii - cx) / fx
+    y = (jj - cy) / fy
+    z = torch.ones_like(x)
+    dirs_cam = torch.stack([x, y, z], dim=-1)  # [H,W,3]
+
+    # We need the openGL c2w to align points rendered via openGL coordspace (even if we store our cameras as opencv)
+    c2w = camera.pose.to(device)
+    
+    dirs_world = dirs_cam @ c2w[:3, :3].T
+    dirs_world = dirs_world / torch.norm(dirs_world, dim=-1, keepdim=True)
+    origins_world = c2w[:3, 3].expand_as(dirs_world)
+
+    return origins_world, dirs_world
 
 
-def sample_IBL(origin, direction, abc, texture):
-    H, W = origin.shape[:2]
+def render_IBL_source(camera, abc, texture):
+    H, W = camera.image_height, camera.image_width
+
+    # 1. Camera rays
+    origin, direction = make_cam_rays(camera)
+
     origin = origin.reshape(-1, 3)
     direction = direction.reshape(-1, 3)
     
@@ -118,8 +131,10 @@ def sample_IBL(origin, direction, abc, texture):
 
     # Intersect rays with plane
     nom = (a.unsqueeze(0) - origin) @ normal
-    denom = (direction @ normal).clamp(min=1e-8)
-    t = nom / denom
+    denom = (direction @ normal)
+    valid = denom.abs() > 1e-8
+    t = torch.empty_like(denom)
+    t[valid] = (nom[valid] / denom[valid])
     x = origin + t * direction
 
     # Project onto u,v basis
@@ -128,32 +143,23 @@ def sample_IBL(origin, direction, abc, texture):
     d = x - a
     u_coord = (d @ u) / u_len2   # [0,1] left→right
     v_coord = (d @ v) / v_len2   # [0,1] bottom→top
-
-    # grid_sample expects (x,y) with y=down, so we flip v
-    v_coord = 1. - v_coord
-
-    hit_mask = (t.squeeze(-1) > 0) & \
-        (u_coord >= 0) & (u_coord <= 1) & \
-        (v_coord >= 0) & (v_coord <= 1)
-               
-    uv = torch.stack([u_coord, v_coord], dim=-1)  # (N,2)
+    
+    # Only sample rays within patch
+    mask = (u_coord >= 0) & (u_coord <= 1) & (v_coord >= 0) & (v_coord <= 1)
+    mask = mask & (t.squeeze() > 0)
+    # uv = torch.stack([u_coord, v_coord], dim=-1)  # (N,2)
+    uv = torch.stack([u_coord, v_coord], dim=-1)
     uv = (2.0 * uv - 1.0).unsqueeze(0).unsqueeze(2)
 
     sampled = F.grid_sample(
         texture.unsqueeze(0), uv,
-        align_corners=True, mode="bilinear"
+        align_corners=False, mode="bilinear"
     ).squeeze(0).squeeze(-1).reshape(3, H, W)
     
-    hit_mask = hit_mask.reshape(H, W)
-    hit_indices = torch.nonzero(hit_mask, as_tuple=False)
+    mask = mask.reshape(H, W).float()
+    sampled = sampled * mask.unsqueeze(0)
 
-    return sampled, hit_mask, hit_indices
-
-SIGNS = torch.tensor([[1, 1],
-                      [-1, 1],
-                      [1, -1],
-                      [-1, -1]], dtype=torch.float).cuda()
-
+    return sampled
 
 @torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
@@ -197,11 +203,20 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
             mode = "ED"
         elif view_args['vis_mode'] == 'invariance':
             mode = "invariance"
+        elif view_args['vis_mode'] == 'xyz':
+            mean_max = means3D.max()
+            mean_min = means3D.min()
+            colors = (means3D - mean_min) / (mean_max - mean_min)
+            colors = means3D.unsqueeze(0)
+            
         elif view_args['vis_mode'] == 'deform':
             colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
+        
+        # Change for rendering with rgb instead of shs
+        if view_args['vis_mode'] in ["deform", "xyz"]:
             mode = "RGB"
             active_sh=None
-        
+            
         # Render
         render, alpha, _ = rendering_pass(
             means3D, rotation, scales, opacity, colors, invariance,
@@ -217,11 +232,19 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
         if view_args['vis_mode'] == 'render':
             render = render.squeeze(0).permute(2,0,1)
     
-            
+            if abc is not None:
+                ibl = render_IBL_source(viewpoint_camera, abc, texture)
+                ibl_alpha = ibl.mean(0).unsqueeze(0)
+
+                alpha = alpha.squeeze(-1)
+                render =  render * (alpha) + (1. - alpha) * ibl
+
+
         elif view_args['vis_mode'] == 'alpha':
             render = alpha
             render = (render - render.min())/ (render.max() - render.min())
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+            
         elif view_args['vis_mode'] == 'D':
             render = (render - render.min())/ (render.max() - render.min())
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
@@ -236,9 +259,13 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
         
+        elif view_args['vis_mode'] == 'xyz':
+            render = render.squeeze(0).permute(2,0,1)
     else:
         render, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
         render = render.squeeze(0)
+        
+        
     return {
         "render": render,
         "extras":extras # A dict containing mor point info

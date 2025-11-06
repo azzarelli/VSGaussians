@@ -1,13 +1,3 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
 
 import torch
 from torch import nn
@@ -44,7 +34,8 @@ class Camera(nn.Module):
 
 
         self.uid = uid
-        self.R = R
+        self.R = R * np.array([[1, -1, -1]])
+
         self.T = T
         self.time = time
         self.fx, self.fy = fx, fy
@@ -77,6 +68,14 @@ class Camera(nn.Module):
         self.canon = None
         self.sceneoccluded_mask = None
         self.diff_image = None
+    
+    
+    def update_K(self):
+        K = np.array([ [self.fx, 0, self.cx],
+                        [0, self.fy, self.cy],
+                        [0,  0,  1]  ])
+        self.K , _ = cv2.getOptimalNewCameraMatrix(K, self.dist, (self.image_width, self.image_height), 1)
+        self.K0 = K
         
     @property
     def intrinsics(self): # Get the intrinsics matric
@@ -92,10 +91,24 @@ class Camera(nn.Module):
         Rt[:3, :3] = self.R
         Rt[:3, 3] = self.T
         Rt[3, 3] = 1.0
+        return torch.from_numpy(Rt).cuda().float()
 
-        C2W = torch.from_numpy(Rt).cuda().float()
-        return C2W
+    @property
+    def w2c(self):
+        c2w = self.pose.unsqueeze(0)
+        R = c2w[:, :3, :3]  # 3 x 3
+        T = c2w[:, :3, 3:4]  # 3 x 1
+        
+        # analytic matrix inverse to get world2camera matrix
+        R_inv = R.transpose(1, 2)
+        T_inv = -torch.bmm(R_inv, T)
+        viewmat = torch.zeros(R.shape[0], 4, 4, device=R.device, dtype=torch.float)
+        viewmat[:, 3, 3] = 1.0  # homogenous
+        viewmat[:, :3, :3] = R_inv
+        viewmat[:, :3, 3:4] = T_inv
+        return viewmat[0]
 
+    
     def load_image_from_flags(self, tag):
         if tag == "image":
             img = Image.open(self.image_path).convert("RGB")
@@ -129,10 +142,4 @@ class Camera(nn.Module):
 
             # remove batch dimension again
             self.diff_image = resized.squeeze(0)
-            # later, in main process:
-            # self.diff_image = self.diff_image.to("cuda")
-            # self.diff_image = torch.load(self.diff_path, map_location="cuda")
-            # print(self.diff_path)
-            # with open(self.diff_path, "rb") as f:
-            #     buffer = io.BytesIO(f.read())
-            # self.diff_image = torch.load(buffer, map_location="cuda")
+    
