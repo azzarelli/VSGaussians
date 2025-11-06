@@ -295,7 +295,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
 
     colors_base = colors_base.squeeze(1).permute(0, 3, 1, 2)
     
-    colors_deform, _, meta = rendering_pass(
+    colors_deform, _, _ = rendering_pass(
         means3D_final,
         rotation_final, 
         scales_final, 
