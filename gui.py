@@ -90,7 +90,7 @@ class GUI(GUIBase):
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
         
-        self.cpuloader = False
+        self.cpuloader = True
         # Set the gaussian mdel and scene
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None:

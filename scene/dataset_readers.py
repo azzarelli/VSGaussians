@@ -211,7 +211,7 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False):
                     time = time,
                 )
                 relit_cams.append(cam_info)
-            break
+
     return relit_cams, background_im_paths, L
 
 import math
@@ -291,7 +291,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False):
     selected_background_fp = background_paths[0]
 
     # Camera path for novel view
-    video_cams = None #generate_circular_cams(path, cam_infos[V_cam*100])
+    video_cams = generate_circular_cams(path, cam_infos[V_cam*100])
     nerf_normalization = getNerfppNorm(relighting_cams)
     
     
