@@ -34,7 +34,7 @@ class Camera(nn.Module):
 
 
         self.uid = uid
-        self.R = R * np.array([[1, -1, -1]])
+        self.R = R * np.array([[1, -1, -1]]) # For some reason nerfstudio stores rotation in opencv and translation in opengl coordinate spaces
 
         self.T = T
         self.time = time
