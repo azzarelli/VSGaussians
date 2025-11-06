@@ -38,7 +38,7 @@ class GUIBase:
         self.buffer_image = np.ones((self.W, self.H, 3), dtype=np.float32)
         
         # Other important visualization parameters
-        self.time = 0.
+        self.time = 0
         self.show_radius = 30.
         self.vis_mode = 'render'
         self.show_mask = 'none'
@@ -93,7 +93,7 @@ class GUIBase:
             f'[{self.stage} {self.iteration}] Time: {time:.2f} | Allocated Memory: {allocated:.2f} MB, Reserved Memory: {reserved:.2f} MB | CPU Memory Usage: {memory_mb:.2f} MB')
     
     def render(self):
-        self.switch_off_viewer = False            
+        self.switch_off_viewer = True            
         cnt = 0
         if self.gui:
             while dpg.is_dearpygui_running():
@@ -104,6 +104,7 @@ class GUIBase:
 
                     if self.iteration <= self.final_iter:
                         # Get batch data
+
                         viewpoint_cams = self.get_batch_views
                         
                         torch.cuda.empty_cache()
@@ -112,7 +113,7 @@ class GUIBase:
                         
                         # Depending on stage process a training step
                         self.train_step(viewpoint_cams)
-
+                    
                         self.iter_end.record()
                     
                     else: # Initialize fine from coarse stage
@@ -194,32 +195,13 @@ class GUIBase:
                         dpg.set_value("_log_test_progress", f"...(training)...")
                         dpg.render_dearpygui_frame()
                         
-                        
                     # Update iteration
                     self.iteration += 1
 
                 elif cnt ==0:
                     self.initialize_abc()
                     cnt = 1
-                # if self.ba_mask_flag:
-                #     self.bundle_adjust_masks()
-                #     self.ba_mask_flag = False
-                # if self.render_novel_view:
-                #     if self.novel_view_background_dir != "" and os.path.exists(self.novel_view_background_dir):
-                #         nv_background_fp = [os.path.join(self.novel_view_background_dir, fp) for fp in os.listdir(self.novel_view_background_dir) if 'jpg' or 'png' in fp]
-                #         with torch.no_grad():
-                #             view_size=len(self.scene.video_camera)
-                #             for i, backgroundfp in enumerate(nv_background_fp):
-                #                 # Static video camera
-                #                 texture = self.scene.load_custom_image(backgroundfp)
 
-                #                 metric_results = self.video_custom_step(self.scene.test_camera[0],texture, i)
-                #                 self.viewer_step()
-                #                 dpg.render_dearpygui_frame()
-                #     else:
-                #         print(f"Input {self.novel_view_background_dir} does not exist")
-                        
-                        
                 with torch.no_grad():
                     self.viewer_step()
                     dpg.render_dearpygui_frame()    
@@ -332,7 +314,8 @@ class GUIBase:
                 abc = self.abc.abc
             except:
                 abc = None
-            id1 = int(self.time*99)
+            id1 = self.time % len(self.scene.ibl)
+            
             texture = self.scene.ibl[id1].cuda()
             
             buffer_image = render(
@@ -601,7 +584,7 @@ class GUIBase:
 
                 
                 def callback_speed_control(sender):
-                    self.time = dpg.get_value(sender)
+                    self.time = int(dpg.get_value(sender)*100)
                     
                 dpg.add_slider_float(
                     label="Time",
@@ -776,7 +759,6 @@ class GUIBase:
         dpg.show_viewport()
         
 from scipy.ndimage import distance_transform_edt
-
 def get_viewmat(optimized_camera_to_world):
     """
     function that converts c2w to gsplat world2camera matrix, using compile for some speed

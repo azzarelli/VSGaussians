@@ -30,14 +30,16 @@ class CameraInfo(NamedTuple):
     image_path: str
     canon_path:str
     so_path: str
-    b_path:str
-    diff_path:str
+    
+    image: torch.Tensor
+    canon:torch.Tensor
+    mask: torch.Tensor
+
 
     uid: int    
     width: int
     height: int
-    time : float
-    feature: torch.Tensor
+    time : int
    
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -72,222 +74,6 @@ def getNerfppNorm(cam_info):
     # breakpoint()
     return {"translate": translate, "radius": radius}
 
-
-import sys
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
-    cam_infos = []
-    image_names = []
-    for idx, key in enumerate(cam_extrinsics):
-        sys.stdout.write('\r')
-        # the exact output you're looking for:
-        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
-        sys.stdout.flush()
-
-        extr = cam_extrinsics[key]
-        intr = cam_intrinsics[extr.camera_id]
-        height = intr.height
-        width = intr.width
-
-        uid = intr.id
-        R = np.transpose(qvec2rotmat(extr.qvec))
-        T = np.array(extr.tvec)
-
-        if intr.model in ["SIMPLE_PINHOLE", "SIMPLE_RADIAL"]:
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[0]
-        elif intr.model=="PINHOLE":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
-        elif intr.model == "OPENCV":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
-        else:
-            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
-
-        image_path = os.path.join(images_folder, os.path.basename(extr.name))
-        image_name = os.path.basename(image_path).split(".")[0]
-        
-        cam_info = CameraInfo(
-            uid=uid, 
-            R=R, T=T,
-            
-            fx=focal_length_x,
-            fy=focal_length_y,
-            cx=width/2.0, cy=height/2.0,
-            width=width, height=height,
-
-            image_path=image_path, 
-            canon_path=None,
-            so_path=None,
-            b_path=None,
-            diff_path = None,
-            time = -1.,
-            feature=None, 
-        ) # default by monocular settings.
-        
-        
-        cam_infos.append(cam_info)
-        image_names.append(image_name)
-    sys.stdout.write('\n')
-    return cam_infos, image_names
-
-def storePly(path, xyz, rgb):
-    # Define the dtype for the structured array
-    dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
-            ('red', 'f4'), ('green', 'f4'), ('blue', 'f4')]
-    
-    normals = np.zeros_like(xyz)
-
-    elements = np.empty(xyz.shape[0], dtype=dtype)
-    # breakpoint()
-    attributes = np.concatenate((xyz, normals, rgb), axis=1)
-    elements[:] = list(map(tuple, attributes))
-
-    # Create the PlyData object and write to file
-    vertex_element = PlyElement.describe(elements, 'vertex')
-    ply_data = PlyData([vertex_element])
-    ply_data.write(path)
-
-def fetchPly(path):
-    plydata = PlyData.read(path)
-    vertices = plydata['vertex']
-    positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
-    colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    
-    try:
-        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
-    except:
-        n_points = positions.shape[0]
-        normals = np.random.randn(n_points, 3)
-        normals /= np.linalg.norm(normals, axis=1, keepdims=True)  # normalize each to unit length
-
-    return BasicPointCloud(points=positions, colors=colors, normals=normals)
-    
-
-
-def process_relighting_cams(path, unsorted_cams, N=100):
-    path2canons = os.path.join(path, 'meta', 'canonical_0')
-    path2masks = os.path.join(path, 'meta', 'masks')
-    path2background = os.path.join(path, 'meta', 'backgrounds')
-    path2images = os.path.join(path, 'images')
-
-    relighting_cams = []
-    background_paths = []
-    cnt=0
-    for idx, cam in enumerate(unsorted_cams):
-        cam_fp_name = f"cam{(idx+1):02}"
-        canon_path = os.path.join(path2canons, f"{cam_fp_name}.jpg")
-        mask_path = os.path.join(path2masks, f"{cam_fp_name}.png")
-        
-        canon_path = canon_path
-        so_path = mask_path
-        
-        cam_images_path = os.path.join(path2images, f'{cam_fp_name}')
-        
-        cam_image_names = sorted(os.listdir(cam_images_path))
-        
-        for jdx, im_name in enumerate(cam_image_names):
-            image_path = os.path.join(cam_images_path, im_name)
-            b_path = os.path.join(path2background, f"{(jdx+1):03}.jpg")
-            
-            relighting_cams.append(CameraInfo(
-            uid=cnt, 
-            R=cam.R, T=cam.T,
-            
-            fx=cam.fx,
-            fy=cam.fy,
-            cx=cam.cx, cy=cam.cy,
-            width=cam.width, height=cam.height,
-
-            image_path=image_path, 
-            canon_path=canon_path,
-            so_path=so_path,
-            b_path=b_path,
-            diff_path = None,
-            
-            time = float(jdx/N),
-            feature=None, 
-            ))
-            
-            cnt += 1
-            
-            if idx == 0:
-                background_paths.append(b_path)
-            
-    return relighting_cams, background_paths
-            
-def readColmapInfo(path, N=98, downsample=2):
-    """Construct data frames for each typice
-    
-    Notes:
-        - We need seperate references for the canonical and the re-lighting scenes
-        1. We first need to load the canonical images, we take the last 19 images/cam_params, as these correspond to the re-lit cameras in our dataset
-        2. Copy the info and extend to 
-    
-    """
-    print("Reading colmap data ...")
-    path2colmap = os.path.join(path, 'meta', 'colmap_0')
-    
-    try:
-        cameras_extrinsic_file = os.path.join(path2colmap, "sparse/0", "images.bin")
-        cameras_intrinsic_file = os.path.join(path2colmap, "sparse/0", "cameras.bin")
-        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    except:
-        cameras_extrinsic_file = os.path.join(path2colmap, "sparse/0", "images.txt")
-        cameras_intrinsic_file = os.path.join(path2colmap, "sparse/0", "cameras.txt")
-        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
-        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
-    
-    
-    path2images = os.path.join(path2colmap, 'dense', 'images')
-    cam_infos_unsorted, image_names = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path2images)
-    sorted_pairs = sorted(zip(image_names, cam_infos_unsorted), key=lambda x: x[0])
-    image_names, canon_cam_infos = zip(*sorted_pairs)
-    
-    nerf_normalization = getNerfppNorm(canon_cam_infos)
-    
-    relighting_cams, background_paths = process_relighting_cams(path, canon_cam_infos[-19:])
-    
-    test_idx_set = [i for i in range(10)]
-    test_cams = [cam for idx, cam in enumerate(relighting_cams) if (idx % 100) in test_idx_set  ]
-    relighting_cams = [cam for idx, cam in enumerate(relighting_cams) if (idx % 100) not in test_idx_set]
-    
-    M = N - len(test_idx_set)
-    mip_splat_cams = [cam for i, cam in enumerate(relighting_cams) if i%M == 0]
-    
-    # Get sparse colmap point cloud
-    ply_path = os.path.join(path2colmap, "dense/fused.ply")
-
-    try:
-        pcd = fetchPly(ply_path)
-        
-    except:
-        pcd = None
-    
-    # if pcd.points.shape[0] > 120000:
-    #     pcd = downsample_pointcloud_voxel_target(pcd, target_points=50_000)
-    
-    
-    scene_info = SceneInfo(
-        point_cloud=pcd,
-        train_cameras=relighting_cams,
-        test_cameras=test_cams,
-        video_cameras=canon_cam_infos,
-        mip_splat_cams=mip_splat_cams,
-        
-        ba_cameras=canon_cam_infos,
-        
-        nerf_normalization=nerf_normalization,
-        background_pth_ids=background_paths,
-        splats=None
-    )
-    return scene_info
-
-def opengl_to_opencv(c2w: np.ndarray) -> np.ndarray:
-    flip = np.diag([1.0, -1.0, -1.0, 1.0]).astype(c2w.dtype)
-    return c2w @ flip
 
 def readCamerasFromTransforms(path, transformsfile):
     cam_infos = []
@@ -341,16 +127,18 @@ def readCamerasFromTransforms(path, transformsfile):
             image_path=image_path,
             canon_path=None,
             so_path=None,
-            b_path=None,
-            diff_path=None,
+            image=None,
+            canon=None,
+            mask=None,
             time=float(frame.get("time", -1.0)),
-            feature=None,
         ))
 
     return cam_infos
 
+from torchvision import transforms as T
+TRANSFORM = T.ToTensor()
 
-def readCamerasFromCanon(path, canon_cams, M=19):
+def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False):
     
     background_path = os.path.join(path, 'meta', 'backgrounds')
     background_im_paths = [os.path.join(background_path, f) for f in sorted(os.listdir(background_path))]
@@ -360,6 +148,10 @@ def readCamerasFromCanon(path, canon_cams, M=19):
     # Get the colmap id for the first relit camera (i.e. the last 19 frames of the nerfstudio dataset)
     N = len(canon_cams) - M
     L = len(background_im_paths)
+    
+    image=None
+    canon=None
+    mask=None
 
     relit_cams = []
     for cam in canon_cams:
@@ -372,7 +164,31 @@ def readCamerasFromCanon(path, canon_cams, M=19):
                 im_path = os.path.join(relit_path, cam_name, im_name)
                 mask_path = os.path.join(masks_path, f'{cam_name}.png')
                 
-                time = background_id / L
+                # Load 
+                if preload_gpu:
+                    img = Image.open(im_path).convert("RGB")
+                    img = img.resize(
+                        (cam.width, cam.height),
+                        resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+                    )            
+                    image = TRANSFORM(img).cuda()
+                    
+                    img = Image.open(cam.image_path).convert("RGB")
+                    img = img.resize(
+                        (cam.width, cam.height),
+                        resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+                    )            
+                    canon = TRANSFORM(img).cuda()
+                    img = Image.open(mask_path).split()[-1]
+                    img = img.resize(
+                        (cam.width, cam.height),
+                        resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+                    )
+
+                    mask = 1. - TRANSFORM(img).cuda()
+
+                time = background_id
+
                 cam_info = CameraInfo(
                     uid=cam.uid, 
                     R=cam.R, T=cam.T,
@@ -387,13 +203,15 @@ def readCamerasFromCanon(path, canon_cams, M=19):
                     image_path=im_path, 
                     canon_path=cam.image_path,
                     so_path=mask_path,
-                    b_path=b_path,
-                    diff_path = None,
+                    
+                    image=image,
+                    canon=canon,
+                    mask=mask,
+                    
                     time = time,
-                    feature=None, 
                 )
                 relit_cams.append(cam_info)
-
+            break
     return relit_cams, background_im_paths, L
 
 import math
@@ -434,27 +252,26 @@ def generate_circular_cams(
                     k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
 
                     width=cam.width, height=cam.height,
-
+                    image=None,
+                    canon=None,
+                    mask=None,
                     image_path=None, 
                     canon_path=None,
                     so_path=None,
-                    b_path=None,
-                    diff_path = None,
-                    time=float(idx / 99),
-                    feature=None, 
+                    time=idx,
                 )
         
         cams.append(cam_info)
     return cams
 
-def readNerfstudioInfo(path, N=98, downsample=2):
+def readNerfstudioInfo(path, N=98, preload_imgs=False):
     """Construct dataset from nerfstudio
     """
     print("Reading nerfstudio data ...")
     # Read camera transforms    
     canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
     
-    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos) # L is the number of background paths
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs) # L is the number of background paths
     
     # split into training and test dataset
     V_cam = 14
@@ -471,10 +288,10 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
     
     # Select cameras with a common background for pose estimation (from the training set)
-    selected_background_fp = relighting_cams[0].b_path
+    selected_background_fp = background_paths[0]
 
     # Camera path for novel view
-    video_cams = generate_circular_cams(path, cam_infos[V_cam*100])
+    video_cams = None #generate_circular_cams(path, cam_infos[V_cam*100])
     nerf_normalization = getNerfppNorm(relighting_cams)
     
     
@@ -494,6 +311,5 @@ def readNerfstudioInfo(path, N=98, downsample=2):
     return scene_info
 
 sceneLoadTypeCallbacks = {
-    "colmap": readColmapInfo,
     "nerfstudio": readNerfstudioInfo
 }

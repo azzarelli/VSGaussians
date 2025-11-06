@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, downsample=2):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, preload_imgs=False):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -39,7 +39,7 @@ class Scene:
         num_cams = 19
         dataset_type="nerfstudio"
 
-        scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, downsample=downsample)
+        scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs)
         
         self.maxframes = max_frames
         self.num_cams = num_cams

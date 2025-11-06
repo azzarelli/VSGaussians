@@ -271,16 +271,16 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
         "extras":extras # A dict containing mor point info
         }
 
+import time
 def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2):
     """Fine/Deformation function
-
     Notes:
         Trains/Renders the deformed gaussians
-            
     """
+    t1 = time.time()
     # Sample triplanes and return Gaussian params + a,b,lambda
     means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_Gaussians_triplane(pc)
-    
+    t2 = time.time()
     # Precompute point a,b,s texture indexing
     colors_final = []
     for texture, cam in zip(textures, viewpoint_camera):
@@ -304,6 +304,9 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         colors_final.append((colors_precomp + color_d).unsqueeze(0))
         
     colors_final = torch.cat(colors_final, dim=0)
+    
+    t3 = time.time()
+    
     M = len(textures)
     means3D_final = means3D.unsqueeze(0).repeat(M, 1, 1)
     rotation_final = rotation.unsqueeze(0).repeat(M, 1, 1)
@@ -323,6 +326,8 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     )
 
     colors_deform = colors_deform.squeeze(1).permute(0, 3, 1, 2)
+    t4 = time.time()
+    print(f"G-call {t2-t1:.4f} MipSamp{t3-t2:.4f} Rend {t4-t3:.4f}")
     
     if return_canon:
         colors_canon, _, _ = rendering_pass(

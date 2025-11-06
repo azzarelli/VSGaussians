@@ -89,13 +89,16 @@ class GUI(GUIBase):
         bg_color = [1, 1, 1] if self.dataset.white_background else [0, 0, 0]
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
+        
+        self.cpuloader = False
         # Set the gaussian mdel and scene
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None:
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start)
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start, preload_imgs=not self.cpuloader)
         else:
 
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config)
+            
+            scene = Scene(dataset, gaussians, self.opt, args.cam_config, preload_imgs=not self.cpuloader)
         
         # Initialize DPG      
         super().__init__(use_gui, scene, gaussians, self.expname, view_test)
@@ -132,20 +135,25 @@ class GUI(GUIBase):
             
             print('Loading dataset..')
             self.viewpoint_stack = self.scene.train_camera
-            self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list))
+
+            if self.cpuloader:
+                self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                    num_workers=16, collate_fn=list))
 
     @property
     def get_batch_views(self): 
-        try:
-            viewpoint_cams = next(self.loader)
-        except StopIteration:
-            viewpoint_stack_loader = DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
-                                                num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
-            self.loader = iter(viewpoint_stack_loader)
-            viewpoint_cams = next(self.loader)
-        return viewpoint_cams
-
+        
+        if self.cpuloader:
+            try:
+                viewpoint_cams = next(self.loader)
+            except StopIteration:
+                viewpoint_stack_loader = DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
+                                                    num_workers=16, collate_fn=list, persistent_workers=False, pin_memory=False,)
+                self.loader = iter(viewpoint_stack_loader)
+                viewpoint_cams = next(self.loader)
+            return viewpoint_cams
+        else:
+            return [self.viewpoint_stack[int(random.random()*len(self.viewpoint_stack))] for i in range(self.opt.batch_size)] 
 
     def train_step(self, viewpoint_cams):
         """Training
@@ -167,7 +175,7 @@ class GUI(GUIBase):
         # Sample the background image
         textures = []
         for cam in viewpoint_cams:
-            id1 = int(cam.time*self.scene.maxframes)
+            id1 = cam.time
             textures.append(self.scene.ibl[id1])
         
         render, canon, info = render_extended(
@@ -228,7 +236,7 @@ class GUI(GUIBase):
     @torch.no_grad
     def test_step(self, viewpoint_cams, index, d_type):
         # Sample the background image
-        id1 = int(viewpoint_cams.time*self.scene.maxframes)
+        id1 = viewpoint_cams.time
         texture = self.scene.ibl[id1].cuda()
         # Rendering pass
         relit, _ = render_extended(
@@ -267,7 +275,7 @@ class GUI(GUIBase):
     @torch.no_grad
     def video_step(self, viewpoint_cams, index):
         # Sample the background image
-        texture = self.scene.ibl[index%99].cuda()
+        texture = self.scene.ibl[index % len(self.scene.ibl)].cuda()
         # Rendering pass
         _, relit, _ = render_extended(
             [viewpoint_cams], 

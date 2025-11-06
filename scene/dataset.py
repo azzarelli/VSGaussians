@@ -41,7 +41,6 @@ class FourDGSdataset(Dataset):
 
             image_path=dataset[index].image_path,
             sceneoccluded_path=dataset[index].so_path,
-            diff_path=dataset[index].diff_path,
             canon_path=dataset[index].canon_path,
             
             uid=dataset[index].uid,
@@ -49,17 +48,22 @@ class FourDGSdataset(Dataset):
         )
         
         if self.loading_flags["image"]:
-            cam.load_image_from_flags("image")
+            if dataset[index].image is None:
+                cam.load_image_from_flags("image")
+            else:
+                cam.image = dataset[index].image
             
         if self.loading_flags["canon"]:
-            cam.load_image_from_flags("canon")
-        
-        if self.loading_flags["differences"]:
-            cam.load_image_from_flags("differences")
+            if dataset[index].canon is None:
+                cam.load_image_from_flags("canon")
+            else:
+                cam.canon = dataset[index].canon
             
         if self.loading_flags["scene_occluded"]:
-            cam.load_image_from_flags("scene_occluded")
-            
+            if dataset[index].mask is None:
+                cam.load_image_from_flags("scene_occluded")
+            else:
+                cam.sceneoccluded_mask = dataset[index].mask
         return cam
 
     def __len__(self):
@@ -76,6 +80,7 @@ class IBLBackround(Dataset):
         self.transform = T.ToTensor()
 
     def load_custom_image(self, img_path):
+        
         image = self.transform(
             Image.open(img_path).convert("RGB")
         )
@@ -91,7 +96,6 @@ class IBLBackround(Dataset):
         
         return len(self.dataset)
 
-import torch.nn as nn
 class ABC:
     def __init__(self, abc):
         self.abc = abc
