@@ -23,6 +23,24 @@ This has been tested on NVidia RTX 3090 w/ py3.10 pt2.4 and cu11.8, and NVidia R
 
 `canon_loss` : Use canonical images to train the canonical color and geometry components
 
+`res_loss` : Uses residual loss function $I^*_{\text{residuals}} = I^*_{\text{deform}} - I^*_{\text{canon}}$ 
+
+`fully_explicit_nomipmap` : Like `fully_explicit` but no mipmapping is used for texture sampling
+
+`mipmap` : Introduces multi-scale mipmaps to texture sampling
+
+`mipmap_scaleloss` : Equates the norm of 3-D Gaussian scales (stop gradient) to the norm of the 2-D texture scales (had gradients), i.e. $\hat{s_{3D}} - \hat{s_{2D}}$. This should force equivalence between gaussian size and sample size meaning that larger gaussians sample coarser features.
+
+`deform_color` : Using color deformation instead of alpha blending for applying $\Delta c$. 
+
+`post_rasterization` : Compute $c' = c + \lambda \Delta c$ after rasterization. Its significantly faster and supposedly should produce smoother texture samples in rendering as the Mahlanobis dist function smooths texture sample coordinates in image space, rather than texture sampling before hand using mipmaps. Results were not good though...
+
+`outer-mip` : Adds a 1px padding to each texture, where `pad_value=[0,0,0]`. This reduces $c'=c$ and enforces the notion that when samples extend past the texture space, they should not be lit by the IBL.
+
+
+
+```
+
 # Data Collection Notes
 
 1. Pretain the splatfacto model (via nerfstudio) on the set of canonical images including those for the relighting videos
