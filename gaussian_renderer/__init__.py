@@ -367,20 +367,23 @@ def render_canonical(viewpoint_camera, pc):
 
     return colors.squeeze(0).permute(0, 3, 1, 2), meta
 
+
+
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):
     I = I.unsqueeze(0)
-    maps = [I]
-    _, C,H,W = I.shape
-    
+    pad_thickness = 1
+    maps = [F.pad(I, (pad_thickness, pad_thickness, pad_thickness, pad_thickness), value=0)]    
     for _ in range(1, num_levels):
+        # I progressively downsampled
         I = F.interpolate(
             I, scale_factor=0.5,
             mode='bilinear', align_corners=False,
             recompute_scale_factor=True
         )
-        maps.append(I)
-        
+        # Add zero padding
+        I_ = F.pad(I, (pad_thickness, pad_thickness, pad_thickness, pad_thickness), value=0)
+        maps.append(I_)
     return maps
 
 def sample_mipmap(I, uv, s, num_levels=3):

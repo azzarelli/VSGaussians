@@ -200,17 +200,7 @@ class GUI(GUIBase):
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        # scales3d = self.gaussians.get_scaling.prod(-1).unsqueeze(-1) # N,1 - cubic volume of gaussian splat
-        # scalesUV = 2**(self.gaussians.get_texscale* self.opt.mip_level) # N,3 # 0 to 1 * mip_level # square pixel density based on inputs
-
-
-        # scales3d_min = scales3d.min()
-        # scales3d = (scales3d - scales3d_min) / (scales3d.max() - scales3d_min)
-        # scalesUV_min = scalesUV.min()
-        # scalesUV = (scalesUV - scalesUV_min) / (scalesUV.max() - scalesUV_min)
-        scale_loss = 0. #l2_loss(scalesUV, scales3d)
-
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + self.opt.lambda_scaling * scale_loss
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss
                    
         with torch.no_grad():
             if self.gui:

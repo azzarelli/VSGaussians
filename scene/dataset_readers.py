@@ -80,7 +80,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-def readCamerasFromTransforms(path, transformsfile, plot=True):
+def readCamerasFromTransforms(path, transformsfile, plot=False):
     cam_infos = []
 
     tf_path = os.path.join(path, transformsfile)
@@ -297,7 +297,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False):
     cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs) # L is the number of background paths
     
     # split into training and test dataset
-    V_cam = 14
+    V_cam = 11
     L_test_idx_set = [8, 12, 27, 36, 48, 55, 61, 71, 81, 98] # The lighting-only test set
     V_test_idx_set = [(V_cam*100)+i for i in range(100) if i not in L_test_idx_set] # The novel-view only test set
     LV_test_idx_set = [(V_cam*100)+i for i in range(100) if i in L_test_idx_set] # The novel-view & novel lighting test set

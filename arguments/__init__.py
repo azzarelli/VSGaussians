@@ -88,7 +88,7 @@ class OptimizationParams(ParamGroup):
         self.custom_sampler=None
         self.iterations = 30_000
         
-        self.mip_level = 2
+        self.mip_level = 3
         
         self.position_lr_init = 0.00016
         # 3DGS/2DGS learning parameters
@@ -105,9 +105,6 @@ class OptimizationParams(ParamGroup):
         # Regularization
         self.lambda_dssim = 0.2
         self.lambda_canon = 0.2
-        self.lambda_residual=0.0
-        self.lambda_scaling=0.2
-
 
         # Densification
         self.prune_opa=0.005
