@@ -391,6 +391,9 @@ def sample_mipmap(I, uv, s, num_levels=3):
         I, Tensor, 3, H, W
     """
     N = s.size(0)
+    
+    # print(I.shape)
+    # exit()
     # 1. Generate mipmaps
     maps = generate_mipmaps(I, num_levels=num_levels)
     

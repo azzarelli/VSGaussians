@@ -75,7 +75,12 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 
-def readCamerasFromTransforms(path, transformsfile):
+import os
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+
+def readCamerasFromTransforms(path, transformsfile, plot=True):
     cam_infos = []
 
     tf_path = os.path.join(path, transformsfile)
@@ -95,7 +100,7 @@ def readCamerasFromTransforms(path, transformsfile):
     g_p2 = contents.get("p2")
 
     # Nerfstudio normalization (transform + scale)
-    frames = contents["frames"] 
+    frames = contents["frames"]
     for idx, frame in enumerate(frames):
         fx = frame.get("fl_x", g_fx)
         fy = frame.get("fl_y", g_fy)
@@ -111,8 +116,6 @@ def readCamerasFromTransforms(path, transformsfile):
 
         # Load and convert transform
         c2w = np.array(frame["transform_matrix"], dtype=np.float32)
-   
-        
         R = c2w[:3, :3]
         T = c2w[:3, 3]
 
@@ -133,7 +136,27 @@ def readCamerasFromTransforms(path, transformsfile):
             time=float(frame.get("time", -1.0)),
         ))
 
+    # --- PLOTTING SECTION ---
+    if plot:
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111, projection='3d')
+        N = len(cam_infos) - 19
+
+        for id, cam in enumerate(cam_infos):
+            if cam.uid > N:
+                T = cam.T
+                ax.scatter(T[0], T[1], T[2], s=50)
+                ax.text(T[0], T[1], T[2], f"{id}", fontsize=9, color='red')
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title("Camera Centers (T) with IDs")
+        plt.tight_layout()
+        plt.show()
+        exit()
     return cam_infos
+
 
 from torchvision import transforms as T
 TRANSFORM = T.ToTensor()

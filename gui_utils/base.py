@@ -93,7 +93,7 @@ class GUIBase:
             f'[{self.stage} {self.iteration}] Time: {time:.2f} | Allocated Memory: {allocated:.2f} MB, Reserved Memory: {reserved:.2f} MB | CPU Memory Usage: {memory_mb:.2f} MB')
     
     def render(self):
-        self.switch_off_viewer = True            
+        self.switch_off_viewer = False            
         cnt = 0
         if self.gui:
             while dpg.is_dearpygui_running():
