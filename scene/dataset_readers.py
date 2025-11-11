@@ -287,14 +287,15 @@ def generate_circular_cams(
         cams.append(cam_info)
     return cams
 
-def readNerfstudioInfo(path, N=98, preload_imgs=False):
+def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[-1, -1, -1]):
     """Construct dataset from nerfstudio
     """
     print("Reading nerfstudio data ...")
     # Read camera transforms    
     canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
     
-    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs) # L is the number of background paths
+    # L is the number of background paths
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs) 
     
     # split into training and test dataset
     V_cam = 11
@@ -317,6 +318,52 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False):
     video_cams = generate_circular_cams(path, cam_infos[V_cam*100])
     nerf_normalization = getNerfppNorm(relighting_cams)
     
+    
+    # Now process relighting cams based on desired dataset arguments for testing
+    num_cams = additional_dataset_args[0]
+    num_textures = additional_dataset_args[1]
+    texture_block = additional_dataset_args[2]
+    
+    n_frames_max = L-len(L_test_idx_set)
+    # Only implement what is necessary num cams 6, 12, 18, num_frames 1, 10, 30, 90
+    if num_cams != -1:
+        if num_cams == 6:
+            # Options
+            selected_cams_ = [14,2,12,10,6,7]
+            selected_cams_ = [14,2,12,10,18,7]
+            selected_cams_ = [15,2,10,12,6,7]
+            
+        elif num_cams == 12:
+            selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 18, 5]
+            selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 6, 5]
+        else:
+            print('No implement error: a invalid --num-cams value was provided')
+            exit()
+        relighting_cams_ = []
+        for i, s in enumerate(selected_cams_):
+            # Remeber that we removed the test cam already so now we have to account for that in our indexing
+            if i > V_cam:
+                s = s-1
+            
+            s = s*n_frames_max
+            
+            for j in range(n_frames_max):
+                relighting_cams_.append(relighting_cams[s+j])
+        # update list
+        relighting_cams = relighting_cams_
+
+    
+    if num_textures != -1: 
+        # Generate list of texture indexs to sample based on inputs
+        texture_index = [(texture_block*num_textures)+i for i in range(num_textures)]
+        
+        relighting_cams_ = []
+        for i, cam in enumerate(relighting_cams):
+            if (i % n_frames_max) in texture_index:
+                relighting_cams_.append(cam)
+            
+        
+        relighting_cams = relighting_cams_
     
     scene_info = SceneInfo(
         train_cameras=relighting_cams,
