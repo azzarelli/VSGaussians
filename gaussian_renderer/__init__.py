@@ -74,7 +74,7 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         # rasterize_mode='antialiased',
         # eps2d=0.3,
         
-        packed=False,
+        packed=True,
         near_plane=0.01,
         far_plane=1e10,
         sh_degree=sh_deg, #pc.active_sh_degree,

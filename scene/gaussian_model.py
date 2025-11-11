@@ -56,7 +56,7 @@ class GaussianModel:
         self.spatial_lr_scale_background = 0
         self.target_neighbours = None
         
-        self.use_default_strategy = False
+        self.use_default_strategy = True
         
         self.setup_functions()
 
@@ -208,8 +208,10 @@ class GaussianModel:
             self.active_sh_degree += 1
 
     def training_setup(self, training_args):        
+        
         ##### Set-up GSplat optimizers #####        
         if self.use_default_strategy:
+ 
             self.strategy = DefaultStrategy(
                 verbose=True,
                 
@@ -237,10 +239,10 @@ class GaussianModel:
             self.strategy = MCMCStrategy(
                 cap_max=2_000_000,            # optional ceiling on splats
                 noise_lr=5e5,                 # strength of the random walk
-                refine_start_iter=500,
+                refine_start_iter=training_args.densify_from_iter,
                 refine_stop_iter=training_args.densify_until_iter,
                 refine_every=training_args.densification_interval,
-                min_opacity=0.01,             # prune floor; match the rest of your pipeline
+                min_opacity=training_args.prune_opa,             # prune floor; match the rest of your pipeline
                 verbose=True
             )
             self.strategy.check_sanity(self.splats, self.gsplat_optimizers)
@@ -266,6 +268,7 @@ class GaussianModel:
         
     def post_backward(self, iteration, info, stage):
         if self.use_default_strategy:
+        
             self.strategy.step_post_backward(
                 params=self.splats,
                 optimizers=self.gsplat_optimizers,
