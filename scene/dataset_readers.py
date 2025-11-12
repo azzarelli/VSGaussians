@@ -329,9 +329,9 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     if num_cams != -1:
         if num_cams == 6:
             # Options
-            selected_cams_ = [14,2,12,10,6,7]
+            # selected_cams_ = [14,2,12,10,6,7]
             selected_cams_ = [14,2,12,10,18,7]
-            selected_cams_ = [15,2,10,12,6,7]
+            # selected_cams_ = [15,2,10,12,6,7]
             
         elif num_cams == 12:
             selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 18, 5]
@@ -342,7 +342,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
         relighting_cams_ = []
         for i, s in enumerate(selected_cams_):
             # Remeber that we removed the test cam already so now we have to account for that in our indexing
-            if i > V_cam:
+            if s > V_cam:
                 s = s-1
             
             s = s*n_frames_max
@@ -364,7 +364,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
             
         
         relighting_cams = relighting_cams_
-    
+
     scene_info = SceneInfo(
         train_cameras=relighting_cams,
         test_cameras=test_cams,

@@ -183,7 +183,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
-            shs_view = invariance.transpose(1, 2).view(-1, 1, 16)
+            shs_view = invariance.transpose(1, 2).view(-1, 3, 16)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
@@ -295,7 +295,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        shs_view = invariance.transpose(1, 2).view(-1, 1, 16)
+        shs_view = invariance.transpose(1, 2).view(-1, 3, 16)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
