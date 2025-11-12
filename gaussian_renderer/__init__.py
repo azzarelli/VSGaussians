@@ -339,10 +339,10 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
             None, 
             viewpoint_camera, 
             pc.active_sh_degree,
-            mode="RGB"
+            mode="RGB+D"
         )
-        colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
 
+        colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
         return colors_deform, colors_canon, meta
     return colors_deform, meta
 
@@ -405,7 +405,6 @@ def sample_mipmap(I, uv, s, num_levels=3):
     uv = uv.unsqueeze(0).unsqueeze(0) # for grid_sample input we need, N,Hout,Wout,2, where N =1, and W=number of points
     
     # Scaling mip-maps
-
     L = s*(num_levels-1.)
     lower = torch.floor(L).long().clamp(max=num_levels-1)
     upper = torch.clamp(lower + 1, max=num_levels-1)
