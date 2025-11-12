@@ -196,15 +196,16 @@ class GUI(GUIBase):
         gt_out = render_gt* masked_gt
         canon_out = canons_gt* masked_gt
         
-        depth = canon[:, -1:] * (1. - masked_gt) # evaluate only the screen
-        canon = canon[:, :-1]
         
-        depth_loss = l1_loss(depth, masked_gt*0.) # we want depth to be 0 everywhere in the screen
 
         # Loss Functions
         deform_loss = l1_loss(render, gt_out)
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
+        
+        depth = canon[:, -1:] * (1. - masked_gt) # evaluate only the screen
+        canon = canon[:, :-1]        
+        depth_loss = l1_loss(depth, masked_gt*0.) # we want depth to be 0 everywhere in the screen
         
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + depth_loss
                    

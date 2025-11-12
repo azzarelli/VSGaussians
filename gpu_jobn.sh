@@ -25,7 +25,7 @@ echo "  EXP_NAME: $EXP_NAME"
 python gui.py -s "$SAVEDIR" \
   --expname "$SAVEDIR/$EXP_NAME" \
   --configs "arguments/$ARGS" \
-  --test_iterations 2000 \
+  --test_iterations 1000 \
   --num-cams $3 \
   --num-textures $4 \
   --num-textures-block $5
