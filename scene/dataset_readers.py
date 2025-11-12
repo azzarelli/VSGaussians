@@ -329,13 +329,10 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     if num_cams != -1:
         if num_cams == 6:
             # Options
-            # selected_cams_ = [14,2,12,10,6,7]
-            selected_cams_ = [14,2,12,10,18,7]
-            # selected_cams_ = [15,2,10,12,6,7]
-            
+            selected_cams_ = [14,2,12,10,6,7]
         elif num_cams == 12:
             selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 18, 5]
-            selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 6, 5]
+            
         else:
             print('No implement error: a invalid --num-cams value was provided')
             exit()
