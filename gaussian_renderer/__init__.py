@@ -313,7 +313,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     scales_final = scales.unsqueeze(0).repeat(M, 1, 1)
     opacity_final = opacity.unsqueeze(0).repeat(M, 1, 1)
 
-    colors_deform, _, meta = rendering_pass(
+    colors_deform, alpha, meta = rendering_pass(
         means3D_final,
         rotation_final, 
         scales_final, 
@@ -339,11 +339,13 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
             None, 
             viewpoint_camera, 
             pc.active_sh_degree,
-            mode="RGB+D"
+            mode="RGB"
         )
 
         colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-        return colors_deform, colors_canon, meta
+        alpha = alpha.squeeze(1).permute(0, 3, 1, 2)
+
+        return colors_deform, colors_canon, alpha, meta
     return colors_deform, meta
 
 

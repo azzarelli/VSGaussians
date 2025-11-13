@@ -555,6 +555,8 @@ class GUIBase:
                 
                 def callback_toggle_show_rgb(sender):
                     self.vis_mode = 'render'
+                def callback_toggle_show_alpha(sender):
+                    self.vis_mode = 'alpha'
                 def callback_toggle_show_depth(sender):
                     self.vis_mode = 'D'
                 def callback_toggle_show_edepth(sender):
@@ -572,7 +574,7 @@ class GUIBase:
 
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
-                    # dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
+                    dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
                     dpg.add_button(label="Invar", callback=callback_toggle_show_invariance)
                     dpg.add_button(label="Deform", callback=callback_toggle_show_deform)
                 

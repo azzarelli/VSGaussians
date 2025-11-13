@@ -179,7 +179,7 @@ class GUI(GUIBase):
             id1 = cam.time
             textures.append(self.scene.ibl[id1])
         
-        render, canon, info = render_extended(
+        render, canon, alpha, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
@@ -203,9 +203,7 @@ class GUI(GUIBase):
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        depth = canon[:, -1:] * (1. - masked_gt) # evaluate only the screen
-        canon = canon[:, :-1]        
-        depth_loss = l1_loss(depth, masked_gt*0.) # we want depth to be 0 everywhere in the screen
+        depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
         
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + depth_loss
                    
@@ -215,7 +213,7 @@ class GUI(GUIBase):
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                 dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
-                # dpg.set_value("_log_deform", f"scale {scale_loss.item():.5f}")
+                dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
