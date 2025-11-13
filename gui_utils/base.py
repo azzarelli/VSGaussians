@@ -13,6 +13,11 @@ from gaussian_renderer import render, render_IBL_source
 from tqdm import tqdm
 import time
 import json
+import cv2
+from torchvision import transforms
+import threading
+import time
+to_tensor = transforms.ToTensor()  # auto converts HWC uint8 → CHW float32 in [0,1]
 
 class GUIBase:
     """This method servers to intialize the DPG visualization (keeping my code cleeeean!)
@@ -57,7 +62,6 @@ class GUIBase:
         self.full_opacity = False
         
         # Rendering/Novel View Settings
-        self.render_novel_view = False
         self.novel_view_background_dir = ""
         self.ba_mask_flag = False
         self.trainable_abc = None
@@ -69,8 +73,9 @@ class GUIBase:
         self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
-        
-        
+        self.play_custom_video = False
+        self.save_custom_video = False
+
         if self.gui:
             print('DPG loading ...')
             dpg.create_context()
@@ -185,7 +190,6 @@ class GUIBase:
                         dpg.set_value("_log_lv_4", f"psnr-y : {datasets['LV']['psnr-y']:.2f}")
                         dpg.set_value("_log_lv_5", f"psnr-crcb : {datasets['LV']['psnr-crcb']:.2f}")
                         dpg.set_value("_log_test_progress", f"Saving json ...")
-                        dpg.render_dearpygui_frame()
                         
                         test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
                         with open(test_fp, "w") as outfile:
@@ -203,9 +207,12 @@ class GUIBase:
                     cnt = 1
 
                 with torch.no_grad():
-                    self.viewer_step()
-                    dpg.render_dearpygui_frame()    
-                    
+                    if self.switch_off_viewer == False:
+                        self.viewer_step()
+                        dpg.render_dearpygui_frame()    
+                    elif self.play_custom_video:
+                        self.play_video()
+                        self.switch_off_viewer = False
                 with torch.no_grad():
                     self.timer.pause() # log and save
                     torch.cuda.synchronize()
@@ -305,71 +312,70 @@ class GUIBase:
     def viewer_step(self):
         t0 = time.time()
         mous_hover_value = [0.]
-        if self.switch_off_viewer == False:
 
-            cam = self.free_cams[self.current_cam_index]
-            cam.time = self.time
-            
-            try:
-                abc = self.abc.abc
-            except:
-                abc = None
-            id1 = self.time % len(self.scene.ibl)
-            
-            texture = self.scene.ibl[id1].cuda()
-            
-            buffer_image = render(
-                    cam,
-                    self.gaussians,
-                    abc,
-                    texture,
-                    view_args={
-                        "vis_mode":self.vis_mode,
-                        "stage":self.stage,
-                        "finecoarse_flag":self.finecoarse_flag
-                    },
-                    mip_level=self.opt.mip_level
-            )
+        cam = self.free_cams[self.current_cam_index]
+        cam.time = self.time
+        
+        try:
+            abc = self.abc.abc
+        except:
+            abc = None
+        id1 = self.time % len(self.scene.ibl)
+        
+        texture = self.scene.ibl[id1].cuda()
+        
+        buffer_image = render(
+                cam,
+                self.gaussians,
+                abc,
+                texture,
+                view_args={
+                    "vis_mode":self.vis_mode,
+                    "stage":self.stage,
+                    "finecoarse_flag":self.finecoarse_flag
+                },
+                mip_level=self.opt.mip_level
+        )
 
-            try:
-                buffer_image = buffer_image["render"]
-            except:
-                print(f'Mode "{self.vis_mode}" does not work')
-                buffer_image = buffer_image['render']
-                
-            # if buffer_image.shape[0] == 1:
-            #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
-            #     buffer_image = buffer_image.repeat(3,1,1)
-            try:# 
-                mous_hover_value = buffer_image[:, self.mous_loc[1], self.mous_loc[0]]
-            except:
-                mous_hover_value = [0.]
+        try:
+            buffer_image = buffer_image["render"]
+        except:
+            print(f'Mode "{self.vis_mode}" does not work')
+            buffer_image = buffer_image['render']
             
-            buffer_image = torch.nn.functional.interpolate(
-                buffer_image.unsqueeze(0),
-                size=(self.H,self.W),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            
-            try:
-                if self.show_mask == 'occ':
-                    mask = cam.sceneoccluded_mask.squeeze(0).cuda()
-                else:
-                    mask = 0.
-                buffer_image[0] += mask*0.5
-            except:
-                pass
-            
-            self.buffer_image = (
-                buffer_image.permute(1, 2, 0)
-                .contiguous()
-                .clamp(0, 1)
-                .contiguous()
-                .detach()
-                .cpu()
-                .numpy()
-            )
+        # if buffer_image.shape[0] == 1:
+        #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
+        #     buffer_image = buffer_image.repeat(3,1,1)
+        try:# 
+            mous_hover_value = buffer_image[:, self.mous_loc[1], self.mous_loc[0]]
+        except:
+            mous_hover_value = [0.]
+        
+        buffer_image = torch.nn.functional.interpolate(
+            buffer_image.unsqueeze(0),
+            size=(self.H,self.W),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+        
+        try:
+            if self.show_mask == 'occ':
+                mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+            else:
+                mask = 0.
+            buffer_image[0] += mask*0.5
+        except:
+            pass
+        
+        self.buffer_image = (
+            buffer_image.permute(1, 2, 0)
+            .contiguous()
+            .clamp(0, 1)
+            .contiguous()
+            .detach()
+            .cpu()
+            .numpy()
+        )
 
         t1 = time.time()
         
@@ -385,6 +391,95 @@ class GUIBase:
         dpg.set_value("_log_view_camera", f"View {self.current_cam_index}")
         if 1./(t1-t0) < 500:
             dpg.set_value("_log_infer_time", f"{1./(t1-t0)} ")
+
+    @torch.no_grad()
+    def play_video(self):
+        self.novel_view_background_dir = "/media/barry/56EA40DEEA40BBCD/DATA/studio_test4-1/video_backgrounds/test_videos/t1.mp4"
+        cap = cv2.VideoCapture(self.novel_view_background_dir)
+        to_tensor = transforms.ToTensor()
+        recorded_frames = []            # stored new frames
+        output_fps = 15     
+
+        while self.play_custom_video:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                self.play_custom_video = False
+                break                
+
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            tensor = to_tensor(frame).cuda()
+
+            cam = self.free_cams[self.current_cam_index]
+            cam.time = self.time
+            abc = self.abc.abc
+            mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+
+            buffer_image = render(
+                cam,
+                self.gaussians,
+                abc,
+                tensor,
+                view_args={
+                    "vis_mode": 'render',
+                    "stage": 'fine',
+                    "finecoarse_flag": False
+                },
+                mip_level=self.opt.mip_level,
+                blending_mask=mask
+            )["render"]
+        
+            
+            buffer_image = torch.nn.functional.interpolate(
+                buffer_image.unsqueeze(0),
+                size=(self.H, self.W),
+                mode="bilinear",
+                align_corners=False
+            ).squeeze(0)
+
+            arr = (
+                buffer_image.permute(1, 2, 0)
+                .clamp(0, 1)
+                .detach()
+                .cpu()
+                .numpy()
+                .copy()
+            )
+
+            dpg.set_value("_texture", arr)
+            time.sleep(1./90.)
+            dpg.render_dearpygui_frame()
+            
+            if self.save_custom_video:
+                # convert float rgb → uint8 bgr for OpenCV video writing
+                frame_uint8 = (arr * 255).astype("uint8")
+                frame_bgr = cv2.cvtColor(frame_uint8, cv2.COLOR_RGB2BGR)
+                recorded_frames.append(frame_bgr)
+        
+        print(self.save_custom_video, len(recorded_frames))
+        if self.save_custom_video:
+            if len(recorded_frames) == 0:
+                print("No frames recorded, skipping save.")
+                return
+
+            output_path = os.path.join(os.path.join(self.save_videos, f"custom_video.mp4"))
+            h, w, _ = recorded_frames[0].shape
+
+            print(f"Saving custom video → {output_path}")
+            writer = cv2.VideoWriter(
+                output_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                output_fps,
+                (w, h)
+            )
+
+            for f in recorded_frames:
+                writer.write(f)
+
+            writer.release()
+            print("Video saved.")
+            self.save_custom_video = False
+
+        cap.release()
     
     @torch.no_grad()
     def initialize_abc(self):
@@ -435,10 +530,6 @@ class GUIBase:
             # add the texture
             dpg.add_image("_texture")
             
-        
-
-        # dpg.set_primary_window("_primary_window", True)
-
         # control window
         with dpg.window(
             label="Control",
@@ -598,10 +689,7 @@ class GUIBase:
             
             if self.view_test:
                 with dpg.collapsing_header(label="Rendering Processing", default_open=True):
-                    def on_text_change(sender, app_data, user_data):
-                        self.novel_view_background_dir = app_data
-                    def callback_toggle_render_novel_view(sender):
-                        self.render_novel_view = ~ self.render_novel_view
+                    
                     def callback_activate_run_ba_mask(sender):
                         self.ba_mask_flag = ~ self.ba_mask_flag
 
@@ -644,14 +732,26 @@ class GUIBase:
                         dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_cx)
                         dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_cy)
                         dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_cz)
+                    
+                    def on_text_change(sender, app_data, user_data):
+                        self.novel_view_background_dir = app_data
                         
+                    def callback_toggle_render_novel_view(sender):
+                        self.switch_off_viewer = True
+                        self.play_custom_video = True
+
+                    def callback_toggle_render_novel_view_save(sender):
+                        self.switch_off_viewer = True
+                        self.play_custom_video = True
+                        self.save_custom_video = True
                         
                     with dpg.group(horizontal=True):
                         dpg.add_text("background fp : ")
                         dpg.add_input_text(callback=on_text_change)
                     
                     with dpg.group(horizontal=True):
-                        dpg.add_button(label="Render Novel View" , callback=callback_toggle_render_novel_view)
+                        dpg.add_button(label="Play" , callback=callback_toggle_render_novel_view)
+                        dpg.add_button(label="Play & Save" , callback=callback_toggle_render_novel_view_save)
         
         def zoom_callback_fov(sender, app_data):
             delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)

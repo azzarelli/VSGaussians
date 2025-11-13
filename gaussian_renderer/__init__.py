@@ -162,7 +162,7 @@ def render_IBL_source(camera, abc, texture):
     return sampled
 
 @torch.no_grad
-def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
+def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blending_mask=None):
     """
     Render the scene for viewing
     """
@@ -231,14 +231,6 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
         # Process image
         if view_args['vis_mode'] == 'render':
             render = render.squeeze(0).permute(2,0,1)
-    
-            if abc is not None:
-                ibl = render_IBL_source(viewpoint_camera, abc, texture)
-                ibl_alpha = ibl.mean(0).unsqueeze(0)
-
-                alpha = alpha.squeeze(-1)
-                render =  render * (alpha) + (1. - alpha) * ibl
-
 
         elif view_args['vis_mode'] == 'alpha':
             render = alpha
@@ -265,6 +257,15 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2):
         render, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
         render = render.squeeze(0)
         
+        if abc is not None:
+            ibl = render_IBL_source(viewpoint_camera, abc, texture)
+            if blending_mask is not None:
+                alpha = blending_mask.unsqueeze(0)
+            else:
+                alpha = 1.
+            
+            render =  render * (alpha) + (1. - alpha) * ibl
+
         
     return {
         "render": render,
@@ -295,7 +296,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        shs_view = invariance.transpose(1, 2).view(-1, 3, 16)
+        shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         

@@ -282,7 +282,6 @@ class GUI(GUIBase):
         
         # Process data
         relit = relit.squeeze(0)
-        
         vutils.save_image(relit, os.path.join(self.save_videos, f"{index:05}.jpg"))
         
     @torch.no_grad
