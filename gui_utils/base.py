@@ -400,6 +400,11 @@ class GUIBase:
         recorded_frames = []            # stored new frames
         output_fps = 15     
 
+        if self.save_custom_video:
+            view_fps = 120
+        else:
+            view_fps = 30
+        
         while self.play_custom_video:
             ret, frame = cap.read()
             if not ret or frame is None:
@@ -446,7 +451,7 @@ class GUIBase:
             )
 
             dpg.set_value("_texture", arr)
-            time.sleep(1./90.)
+            time.sleep(1./view_fps)
             dpg.render_dearpygui_frame()
             
             if self.save_custom_video:
@@ -455,7 +460,6 @@ class GUIBase:
                 frame_bgr = cv2.cvtColor(frame_uint8, cv2.COLOR_RGB2BGR)
                 recorded_frames.append(frame_bgr)
         
-        print(self.save_custom_video, len(recorded_frames))
         if self.save_custom_video:
             if len(recorded_frames) == 0:
                 print("No frames recorded, skipping save.")
@@ -478,7 +482,6 @@ class GUIBase:
             writer.release()
             print("Video saved.")
             self.save_custom_video = False
-
         cap.release()
     
     @torch.no_grad()
@@ -654,8 +657,6 @@ class GUIBase:
                     self.vis_mode = 'ED'
                 def callback_toggle_show_2dgsdepth(sender):
                     self.vis_mode = '2D'
-                def callback_toggle_show_norms(sender):
-                    self.vis_mode = 'normals'
                 def callback_toggle_show_XYZ(sender):
                     self.vis_mode = 'xyz'
                 def callback_toggle_show_invariance(sender):

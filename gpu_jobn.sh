@@ -4,7 +4,7 @@
 #SBATCH --output=baseline.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
-#SBATCH --time=03:30:00
+#SBATCH --time=03:00:00
 
 module load cray-python
 module load cudatoolkit

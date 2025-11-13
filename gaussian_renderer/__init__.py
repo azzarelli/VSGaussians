@@ -5,7 +5,7 @@ from gsplat.rendering import rasterization
 
 from utils.sh_utils import eval_sh
 
-
+import time
 def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
@@ -168,9 +168,9 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
     """
     extras = None
 
-    time = torch.tensor(viewpoint_camera.time).to(pc.splats["means"].device).repeat(pc.splats["means"].shape[0], 1)
     
     if view_args["finecoarse_flag"]:
+
         if view_args['vis_mode'] not in ['invariance', 'deform']:
             means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
             invariance = None
@@ -183,10 +183,10 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
-            shs_view = invariance.transpose(1, 2).view(-1, 3, 16)
+            shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
-            
+        
         active_sh = pc.active_sh_degree
         # Set arguments depending on type of viewing
         if view_args['vis_mode'] in 'render':
@@ -246,7 +246,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] == 'invariance':
-            render = render.squeeze(-1).repeat(3,1,1)
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
@@ -254,25 +254,26 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         elif view_args['vis_mode'] == 'xyz':
             render = render.squeeze(0).permute(2,0,1)
     else:
-        render, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
+
+        render, meta = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
         render = render.squeeze(0)
-        
+        alpha = meta[1].squeeze(-1).squeeze(0)
         if abc is not None:
+            t1 = time.time()
             ibl = render_IBL_source(viewpoint_camera, abc, texture)
-            if blending_mask is not None:
-                alpha = blending_mask.unsqueeze(0)
-            else:
-                alpha = 1.
+            # if blending_mask is not None:
+            #     alpha = blending_mask.unsqueeze(0)
+
             
             render =  render * (alpha) + (1. - alpha) * ibl
-
+            t2 = time.time()
+            print( 1./(t2-t1))
         
     return {
         "render": render,
         "extras":extras # A dict containing mor point info
         }
 
-import time
 def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2):
     """Fine/Deformation function
     Notes:
@@ -328,7 +329,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
 
     colors_deform = colors_deform.squeeze(1).permute(0, 3, 1, 2)
     # t4 = time.time()
-    # print(f"G-call {t2-t1:.4f} MipSamp{t3-t2:.4f} Rend {t4-t3:.4f}")
+    # print(f"G-call {1./(t2-t1):.4f} MipSamp{1./(t3-t2):.4f} Rend {1./(t4-t3):.4f}")
     
     if return_canon:
         colors_canon, _, _ = rendering_pass(
@@ -347,7 +348,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         alpha = alpha.squeeze(1).permute(0, 3, 1, 2)
 
         return colors_deform, colors_canon, alpha, meta
-    return colors_deform, meta
+    return colors_deform, (meta, alpha)
 
 
 def render_canonical(viewpoint_camera, pc):
