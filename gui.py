@@ -203,8 +203,8 @@ class GUI(GUIBase):
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        # depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
-        depth_loss = 0.
+        depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
+        # depth_loss = 0.
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + depth_loss
                    
         with torch.no_grad():
