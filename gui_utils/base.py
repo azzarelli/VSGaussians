@@ -75,7 +75,8 @@ class GUIBase:
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         self.play_custom_video = False
         self.save_custom_video = False
-
+        self.save_frame=False
+        
         if self.gui:
             print('DPG loading ...')
             dpg.create_context()
@@ -378,8 +379,13 @@ class GUIBase:
         )
 
         t1 = time.time()
-        
         buffer_image = self.buffer_image
+
+        if self.save_frame:
+            frame_uint8 = (buffer_image * 255).astype("uint8")
+            frame_bgr = cv2.cvtColor(frame_uint8, cv2.COLOR_RGB2BGR)
+            cv2.imwrite("current_frame.png", frame_bgr)
+            self.save_frame = False
 
         dpg.set_value(
             "_texture", buffer_image
@@ -394,7 +400,6 @@ class GUIBase:
 
     @torch.no_grad()
     def play_video(self):
-        self.novel_view_background_dir = "/media/barry/56EA40DEEA40BBCD/DATA/studio_test4-1/video_backgrounds/test_videos/t1.mp4"
         cap = cv2.VideoCapture(self.novel_view_background_dir)
         to_tensor = transforms.ToTensor()
         recorded_frames = []            # stored new frames
@@ -404,13 +409,15 @@ class GUIBase:
             view_fps = 120
         else:
             view_fps = 30
+        view_fps = 200
+
+        output_fps = cap.get(cv2.CAP_PROP_FPS)
         
         while self.play_custom_video:
             ret, frame = cap.read()
             if not ret or frame is None:
                 self.play_custom_video = False
                 break                
-
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             tensor = to_tensor(frame).cuda()
 
@@ -451,11 +458,11 @@ class GUIBase:
             )
 
             dpg.set_value("_texture", arr)
-            time.sleep(1./view_fps)
+            # time.sleep(1./view_fps)
             dpg.render_dearpygui_frame()
             
             if self.save_custom_video:
-                # convert float rgb → uint8 bgr for OpenCV video writing
+                # convert float rgb → u+nt8 bgr for OpenCV video writing
                 frame_uint8 = (arr * 255).astype("uint8")
                 frame_bgr = cv2.cvtColor(frame_uint8, cv2.COLOR_RGB2BGR)
                 recorded_frames.append(frame_bgr)
@@ -632,10 +639,12 @@ class GUIBase:
                     for i in range(len(self.free_cams)):
                         self.free_cams[i] = copy.deepcopy(self.original_cams[i])
                     self.current_cam_index = 0
-                
+                def callback_toggle_save_frame(sender):
+                    self.save_frame = True
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Reset Fov", callback=callback_toggle_reset_cam)
-                
+                    dpg.add_button(label="Save Frame", callback=callback_toggle_save_frame)
+
                 def callback_toggle_sceneocc_mask(sender):
                     self.show_mask = 'occ'
                 def callback_toggle_no_mask(sender):
@@ -656,7 +665,7 @@ class GUIBase:
                 def callback_toggle_show_edepth(sender):
                     self.vis_mode = 'ED'
                 def callback_toggle_show_2dgsdepth(sender):
-                    self.vis_mode = '2D'
+                    self.vis_mode = '2D' 
                 def callback_toggle_show_XYZ(sender):
                     self.vis_mode = 'xyz'
                 def callback_toggle_show_invariance(sender):
@@ -736,6 +745,7 @@ class GUIBase:
                     
                     def on_text_change(sender, app_data, user_data):
                         self.novel_view_background_dir = app_data
+                        print(self.novel_view_background_dir)
                         
                     def callback_toggle_render_novel_view(sender):
                         self.switch_off_viewer = True
