@@ -7,13 +7,6 @@ from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
 import torch
 import json
-from pathlib import Path
-from plyfile import PlyData, PlyElement
-from utils.sh_utils import SH2RGB
-# from scene.gaussian_model import BasicPointCloud
-from utils.general_utils import PILtoTorch
-from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
-    read_extrinsics_binary, read_intrinsics_binary
 class CameraInfo(NamedTuple):
     R: np.array
     T: np.array
@@ -79,6 +72,7 @@ import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from plyfile import PlyData, PlyElement
 
 def readCamerasFromTransforms(path, transformsfile, plot=False):
     cam_infos = []
@@ -116,9 +110,9 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
 
         # Load and convert transform
         c2w = np.array(frame["transform_matrix"], dtype=np.float32)
-        R = c2w[:3, :3]
+        R =  c2w[:3, :3]
         T = c2w[:3, 3]
-
+        
         image_path = os.path.normpath(os.path.join(path, frame["file_path"]))
 
         cam_infos.append(CameraInfo(
@@ -135,28 +129,88 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
             mask=None,
             time=float(frame.get("time", -1.0)),
         ))
+    cam_infos.sort(key=lambda c: os.path.basename(c.image_path))
 
-    # --- PLOTTING SECTION ---
     if plot:
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection='3d')
-        N = len(cam_infos) - 19
+        import plotly.graph_objects as go
+        from plyfile import PlyData
+
+        plydata = PlyData.read(os.path.join(path, 'splat', 'splat.ply'))
+
+        xyz = np.stack((
+            np.asarray(plydata.elements[0]["x"]),
+            np.asarray(plydata.elements[0]["y"]),
+            np.asarray(plydata.elements[0]["z"])
+        ), axis=1)
+
+        fig = go.Figure()
+
+        # --- Add point cloud ---
+        fig.add_trace(go.Scatter3d(
+            x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2],
+            mode='markers',
+            marker=dict(size=1, opacity=0.3, color='gray'),
+            name='Point Cloud'
+        ))
+
+        axis_len = 0.1
+        N = len(cam_infos) - 100
+
+        # Helper to add an arrow using a line segment
+        def add_arrow(fig, start, vec, color, name=None):
+            fig.add_trace(go.Scatter3d(
+                x=[start[0], start[0] + vec[0]],
+                y=[start[1], start[1] + vec[1]],
+                z=[start[2], start[2] + vec[2]],
+                mode='lines',
+                line=dict(width=6, color=color),
+                name=name,
+                showlegend=False
+            ))
 
         for id, cam in enumerate(cam_infos):
-            if cam.uid > N:
+            if id < N:
                 T = cam.T
-                ax.scatter(T[0], T[1], T[2], s=50)
-                ax.text(T[0], T[1], T[2], f"{id}", fontsize=9, color='red')
+                R = cam.R
 
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-        ax.set_title("Camera Centers (T) with IDs")
-        plt.tight_layout()
-        plt.show()
+                # --- Camera center ---
+                fig.add_trace(go.Scatter3d(
+                    x=[T[0]], y=[T[1]], z=[T[2]],
+                    mode='markers+text',
+                    marker=dict(size=4, color='black'),
+                    text=[str(id)],
+                    textposition='top center',
+                    name=f'cam {id}',
+                    showlegend=False
+                ))
+
+                # Axes
+                x_axis = R[:, 0] * axis_len
+                y_axis = R[:, 1] * axis_len
+                z_axis = R[:, 2] * axis_len
+                forward = -R[:, 2] * 0.2
+
+                add_arrow(fig, T, x_axis, "red")
+                add_arrow(fig, T, y_axis, "green")
+                add_arrow(fig, T, z_axis, "blue")
+                add_arrow(fig, T, forward, "cyan")
+
+        # Layout
+        fig.update_layout(
+            title="Camera Centers + Rotation Directions (Plotly)",
+            scene=dict(
+                xaxis_title="X",
+                yaxis_title="Y",
+                zaxis_title="Z",
+                aspectmode="data",
+            ),
+            width=1000,
+            height=800,
+        )
+
+        fig.show()
         exit()
     return cam_infos
-
 
 from torchvision import transforms as T
 TRANSFORM = T.ToTensor()
@@ -235,6 +289,59 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False):
                 )
                 relit_cams.append(cam_info)
 
+    return relit_cams, background_im_paths, L
+
+
+def readCamerasFromCanonTensoir(path, canon_cams, M=100):
+    
+    background_path = os.path.join(path, 'meta', 'backgrounds')
+    background_im_paths = [os.path.join(background_path, f) for f in sorted(os.listdir(background_path))]
+    relit_path = os.path.join(path, 'meta', 'images')
+    masks_path = os.path.join(path, 'meta', 'masks')
+
+    # )
+    N = len(canon_cams) - M
+    L = len(background_im_paths)
+    
+    image=None
+    canon=None
+    mask=None
+
+    relit_cams = []
+    for cam in canon_cams:
+        cam_id = cam.uid
+
+        cam_name = f'cam{cam_id:03}'
+        for background_id, b_path in enumerate(background_im_paths):
+            im_name = b_path.split('/')[-1] # e.g. '000.jpg'
+            im_path = os.path.join(relit_path, cam_name, im_name)
+            mask_path = os.path.join(masks_path, f'{cam_name}.png')
+
+            time = background_id
+
+            cam_info = CameraInfo(
+                uid=cam.uid, 
+                R=cam.R, T=cam.T,
+                
+                fx=cam.fx,
+                fy=cam.fy,
+                cx=cam.cx, cy=cam.cy,
+                k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
+
+                width=cam.width, height=cam.height,
+
+                image_path=im_path, 
+                canon_path=cam.image_path,
+                so_path=mask_path,
+                
+                image=image,
+                canon=canon,
+                mask=mask,
+                
+                time = time,
+            )
+            relit_cams.append(cam_info)
+    
     return relit_cams, background_im_paths, L
 
 import math
@@ -377,6 +484,44 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     )
     return scene_info
 
+
+def readTensoir(path):
+    """Construct dataset from nerfstudio
+    """
+    print("Reading nerfstudio data ...")
+    # Read camera transforms    
+    canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
+    
+    # L is the number of background paths
+    cam_infos, background_paths, L = readCamerasFromCanonTensoir(path, canon_cam_infos, M=100) 
+    
+    test_cams = [cam for idx, cam in enumerate(cam_infos) if idx < 200*8]
+    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if idx >= 200*8]
+
+    # Select cameras with a common background for pose estimation (from the training set)
+    selected_background_fp = background_paths[0]
+
+    # Camera path for novel view
+    video_cams = None #generate_circular_cams(path, cam_infos[0])
+    nerf_normalization = getNerfppNorm(relighting_cams)
+    
+
+    scene_info = SceneInfo(
+        train_cameras=relighting_cams,
+        test_cameras=test_cams,
+        video_cameras=video_cams,
+        
+        ba_background_fp=selected_background_fp,
+        
+        nerf_normalization=nerf_normalization,
+        background_pth_ids=background_paths,
+
+        param_path=os.path.join(path, 'splat','splat.ply'),
+
+    )
+    return scene_info
+
 sceneLoadTypeCallbacks = {
-    "nerfstudio": readNerfstudioInfo
+    "nerfstudio": readNerfstudioInfo,
+    "tensoir": readTensoir
 }

@@ -8,14 +8,15 @@ class FourDGSdataset(Dataset):
         self,
         dataset,
         dataset_type,
+        dataset_name
     ):
-        if dataset_type in ['train', 'video']:
-            self.dataset = dataset
-            self.subset_dict = None
-        elif dataset_type == 'test':
-            self.dataset = dataset[0] + dataset[1] + dataset[2]
-            self.subset_idxs = [len(dataset[0]), len(dataset[1]), len(dataset[2])] # Also the starting index of the following dataset-subset
-        
+        self.dataset = dataset
+        self.subset_dict = None
+        if dataset_name == 'nerfstudio':
+            if dataset_type == 'test':
+                self.dataset = dataset[0] + dataset[1] + dataset[2]
+                self.subset_idxs = [len(dataset[0]), len(dataset[1]), len(dataset[2])] # Also the starting index of the following dataset-subset
+            
         self.dataset_type = dataset_type
         
         self.loading_flags = {

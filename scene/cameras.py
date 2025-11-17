@@ -34,8 +34,9 @@ class Camera(nn.Module):
 
 
         self.uid = uid
-        self.R = R * np.array([[1, -1, -1]]) # For some reason nerfstudio stores rotation in opencv and translation in opengl coordinate spaces
-
+        # self.R = R * np.array([[1, -1, -1]]) # For some reason nerfstudio stores rotation in opencv and translation in opengl coordinate spaces
+        opencv_to_opengl = np.diag([1, -1, -1])
+        self.R = R @ opencv_to_opengl
         self.T = T
         self.time = time
         self.fx, self.fy = fx, fy
@@ -49,10 +50,9 @@ class Camera(nn.Module):
         
         self.dist = dist
         self.K0 = K
-
+        
         self.image_height = height
         self.image_width = width
-        
         self.zfar = 100.0
         self.znear = 0.01
 
@@ -112,34 +112,24 @@ class Camera(nn.Module):
     def load_image_from_flags(self, tag):
         if tag == "image":
             img = Image.open(self.image_path).convert("RGB")
-            img = img.resize(
-                (self.image_width, self.image_height),
-                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
-            )            
+            # img = img.resize(
+            #     (self.image_width, self.image_height),
+            #     resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            # )            
             self.image = TRANSFORM(img)
         elif tag == "canon":
             img = Image.open(self.canon_path).convert("RGB")
-            img = img.resize(
-                (self.image_width, self.image_height),
-                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
-            )            
+            # img = img.resize(
+            #     (self.image_width, self.image_height),
+            #     resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            # )            
             self.canon = TRANSFORM(img)
         elif tag == "scene_occluded":
             mask = Image.open(self.sceneoccluded_path).split()[-1]
-            mask = mask.resize(
-                (self.image_width, self.image_height),
-                resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
-            )
-
+            # mask = mask.resize(
+            #     (self.image_width, self.image_height),
+            #     resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
+            # )
             self.sceneoccluded_mask = 1. - TRANSFORM(mask)
-            
-        elif tag == "differences":
-            
-            diff_image = torch.load(self.diff_path, map_location="cpu").unsqueeze(0)
 
-            # resize (height=512, width=512)
-            resized = F.interpolate(diff_image, size=(self.image_height, self.image_width), mode='bilinear', align_corners=False)
-
-            # remove batch dimension again
-            self.diff_image = resized.squeeze(0)
     

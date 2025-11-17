@@ -35,21 +35,27 @@ class Scene:
                 self.loaded_iter = load_iteration
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
-        max_frames = 100
-        num_cams = 19
-        dataset_type="nerfstudio"
-
-        scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+        
+        if "other" in args.source_path:
+            max_frames = 8
+            num_cams = 100
+            dataset_type="tensoir"
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path)
+        else:
+            max_frames = 100
+            num_cams = 19
+            dataset_type="nerfstudio"
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
         
         self.maxframes = max_frames
         self.num_cams = num_cams
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
         
-        self.train_camera = FourDGSdataset(scene_info.train_cameras, "train")
-        self.test_camera = FourDGSdataset(scene_info.test_cameras, "test")
+        self.train_camera = FourDGSdataset(scene_info.train_cameras, "train", dataset_type)
+        self.test_camera = FourDGSdataset(scene_info.test_cameras, "test",dataset_type )
                                 
-        self.video_camera = FourDGSdataset(scene_info.video_cameras, "video")
+        self.video_camera = FourDGSdataset(scene_info.video_cameras, "video", dataset_type)
         
         self.ibl = IBLBackround(scene_info.background_pth_ids)
 

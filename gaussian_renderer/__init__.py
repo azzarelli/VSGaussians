@@ -60,7 +60,6 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         w2c = viewmat
         width = cam.image_width
         height = cam.image_height
-        
     # Typical RGB render of base color
     colors, alphas, meta = rasterization(
         means3D, rotation, scales, opacity.squeeze(-1), colors,

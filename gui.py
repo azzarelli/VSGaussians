@@ -203,8 +203,8 @@ class GUI(GUIBase):
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
-        depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
-        # depth_loss = 0.
+        # depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
+        depth_loss = 0.
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + 0.2*depth_loss
                    
         with torch.no_grad():
@@ -213,7 +213,7 @@ class GUI(GUIBase):
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
                 dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
-                dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
+                # dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
