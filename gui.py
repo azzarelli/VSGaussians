@@ -196,7 +196,6 @@ class GUI(GUIBase):
         gt_out = render_gt* masked_gt
         canon_out = canons_gt* masked_gt
         
-        
 
         # Loss Functions
         deform_loss = l1_loss(render, gt_out)

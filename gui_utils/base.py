@@ -151,15 +151,18 @@ class GUIBase:
                         }
                         test_size = len(self.scene.test_camera)
                         dataset_idxs = self.scene.test_camera.subset_idxs
-
+                        cnt = 0
                         for i, test_cam in enumerate(self.scene.test_camera):
-                            if i < dataset_idxs[0]: # L-only tests
-                                d_type = "L"
-                            elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
-                                d_type = "V"
+                            if dataset_idxs is not None:
+                                if i < dataset_idxs[0]: # L-only tests
+                                    d_type = "L"
+                                elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                                    d_type = "V"
+                                else:
+                                    d_type = "LV"
                             else:
                                 d_type = "LV"
-                                
+                                cnt += 1
                             metric_results = self.test_step(test_cam, i, d_type)
                         
                                 
@@ -170,20 +173,23 @@ class GUIBase:
                             dpg.render_dearpygui_frame()
 
                         # Average
+                        if dataset_idxs is None:
+                            dataset_idxs = [test_size]
+
                         for key, lengths in zip(datasets.keys(), dataset_idxs):
                             for key_1 in metrics.keys():
                                 datasets[key][key_1] /= lengths
 
-                        # Logs with 3 decimal places
-                        dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
-                        dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
-                        dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
-                        dpg.set_value("_log_l_4", f"psnr-y : {datasets['L']['psnr-y']:.2f}")
-                        dpg.set_value("_log_l_5", f"psnr-crcb : {datasets['L']['psnr-crcb']:.2f}")
+                            # Logs with 3 decimal places
+                            dpg.set_value("_log_l_1", f"mse  : {datasets['L']['mse']:.3f}")
+                            dpg.set_value("_log_l_2", f"ssim : {datasets['L']['ssim']:.3f}")
+                            dpg.set_value("_log_l_3", f"psnr : {datasets['L']['psnr']:.2f}")
+                            dpg.set_value("_log_l_4", f"psnr-y : {datasets['L']['psnr-y']:.2f}")
+                            dpg.set_value("_log_l_5", f"psnr-crcb : {datasets['L']['psnr-crcb']:.2f}")
 
-                        dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
-                        dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
-                        dpg.set_value("_log_v_3", f"psnr : {datasets['V']['psnr']:.2f}")
+                            dpg.set_value("_log_v_1", f"mse  : {datasets['V']['mse']:.3f}")
+                            dpg.set_value("_log_v_2", f"ssim : {datasets['V']['ssim']:.3f}")
+                            dpg.set_value("_log_v_3", f"psnr : {datasets['V']['psnr']:.2f}")
 
                         dpg.set_value("_log_lv_1", f"mse  : {datasets['LV']['mse']:.3f}")
                         dpg.set_value("_log_lv_2", f"ssim : {datasets['LV']['ssim']:.3f}")

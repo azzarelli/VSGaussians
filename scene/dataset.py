@@ -11,7 +11,7 @@ class FourDGSdataset(Dataset):
         dataset_name
     ):
         self.dataset = dataset
-        self.subset_dict = [len(dataset)]
+        self.subset_idxs = None #[len(dataset)]
         if dataset_name == 'nerfstudio':
             if dataset_type == 'test':
                 self.dataset = dataset[0] + dataset[1] + dataset[2]

@@ -122,7 +122,7 @@ class OptimizationParams(ParamGroup):
         self.densification_interval = 500
         
         self.densify_from_iter = 3000
-        self.densify_until_iter = 12_000
+        self.densify_until_iter = 10_000
 
         self.batch_size=1
         

@@ -485,7 +485,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     return scene_info
 
 
-def readTensoir(path):
+def readTensoir(path, additional_dataset_args=[-1, -1, -1]):
     """Construct dataset from nerfstudio
     """
     print("Reading nerfstudio data ...")
@@ -505,6 +505,12 @@ def readTensoir(path):
     video_cams = None #generate_circular_cams(path, cam_infos[0])
     nerf_normalization = getNerfppNorm(relighting_cams)
     
+    
+    # Now filter out testing background from 
+    background_id_to_test = additional_dataset_args[0]  
+    assert background_id_to_test < 8 and background_id_to_test > 0, "Additional data arg not bteween 0 and 7"
+    test_cams = [cam for idx, cam in enumerate(test_cams) if (idx %8) == background_id_to_test]
+    relighting_cams = [cam for idx, cam in enumerate(relighting_cams) if (idx %8) != background_id_to_test]
 
     scene_info = SceneInfo(
         train_cameras=relighting_cams,
