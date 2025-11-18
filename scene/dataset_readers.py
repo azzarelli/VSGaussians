@@ -488,7 +488,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
 def readTensoir(path, additional_dataset_args=[-1, -1, -1]):
     """Construct dataset from nerfstudio
     """
-    print("Reading nerfstudio data ...")
+    print("Reading tensoir data ...")
     # Read camera transforms    
     canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
     

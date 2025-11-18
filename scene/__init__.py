@@ -40,6 +40,7 @@ class Scene:
             max_frames = 8
             num_cams = 100
             dataset_type="tensoir"
+            print(additional_dataset_args)
             scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, additional_dataset_args=additional_dataset_args)
         else:
             max_frames = 100
