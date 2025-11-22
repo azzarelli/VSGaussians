@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, preload_imgs=False, additional_dataset_args=[-1,-1,-1]):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, preload_imgs=False, additional_dataset_args=1):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -36,28 +36,22 @@ class Scene:
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
         
-        if "other" in args.source_path:
-            max_frames = 8
-            num_cams = 100
-            dataset_type="tensoir"
-            print(additional_dataset_args)
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, additional_dataset_args=additional_dataset_args)
-        elif "scene2" in args.source_path:
-            max_frames = 99
+        if "scene2" in args.source_path:
+            max_frames = 33
             num_cams = 19
             dataset_type="scene2"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
         elif "scene3" in args.source_path:
-            max_frames = 99
+            max_frames = 33
             num_cams = 19
             dataset_type="scene3"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
         
         else:
             max_frames = 100
             num_cams = 19
             dataset_type="nerfstudio"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
         
         self.maxframes = max_frames
         self.num_cams = num_cams

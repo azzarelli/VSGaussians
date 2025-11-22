@@ -25,7 +25,5 @@ else
     --expname "$SAVEDIR/$EXP_NAME" \
     --configs arguments/baseline.py \
     --test_iterations 2000 \
-    --num-cams $3 \
-    --num-textures $4 \
-    --num-textures-block $5
+    --subset $3 
 fi

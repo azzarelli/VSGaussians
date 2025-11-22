@@ -45,7 +45,7 @@ class GUI(GUIBase):
                  expname,
                  view_test,
                  use_gui:bool=False,
-                 additional_dataset_args=[-1, -1, -1]
+                 additional_dataset_args=1
                  ):
         self.stage = 'fine'
         expname = 'output/'+expname
@@ -345,9 +345,7 @@ if __name__ == "__main__":
     parser.add_argument("--cam-config", type=str, default = "4")
     parser.add_argument("--downsample", type=int, default=1)
     
-    parser.add_argument("--num-cams", type=int, default=-1)
-    parser.add_argument("--num-textures", type=int, default=-1)    
-    parser.add_argument("--num-textures-block", type=int, default=-1)    
+    parser.add_argument("--subset", type=int, default=1)
     
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
@@ -367,8 +365,6 @@ if __name__ == "__main__":
     initial_name = args.expname     
     name = f'{initial_name}'
     
-    additional_dataset_args = [args.num_cams, args.num_textures, args.num_textures_block]
-
     gui = GUI(
         args=args, 
         hyperparams=hyp, 
@@ -383,7 +379,7 @@ if __name__ == "__main__":
         view_test=args.view_test,
 
         use_gui=False if dpg is None else True,
-        additional_dataset_args=additional_dataset_args
+        additional_dataset_args=args.subset
     )
     gui.render()
     del gui
