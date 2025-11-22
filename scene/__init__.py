@@ -42,6 +42,17 @@ class Scene:
             dataset_type="tensoir"
             print(additional_dataset_args)
             scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, additional_dataset_args=additional_dataset_args)
+        elif "scene2" in args.source_path:
+            max_frames = 99
+            num_cams = 19
+            dataset_type="scene2"
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+        elif "scene3" in args.source_path:
+            max_frames = 99
+            num_cams = 19
+            dataset_type="scene3"
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, max_frames, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+        
         else:
             max_frames = 100
             num_cams = 19
@@ -82,6 +93,8 @@ class Scene:
                 self.gaussians.load_ply(
                     scene_info.param_path,
                     opt,
+                    cams=self.train_camera,
+                    num_cams=num_cams
                 )
             else:
                 self.gaussians.create_from_pcd(scene_info.param_path, opt)

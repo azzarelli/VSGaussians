@@ -130,6 +130,64 @@ class Camera(nn.Module):
             #     (self.image_width, self.image_height),
             #     resample=Image.LANCZOS  # or Image.NEAREST, Image.BICUBIC, Image.LANCZOS
             # )
-            self.sceneoccluded_mask = 1. - TRANSFORM(mask)
+            self.sceneoccluded_mask = (1. -TRANSFORM(mask))
 
-    
+        
+    def screenspace_xyz_search(self, points_3d):
+        """
+        Returns:
+            outside_idx: indices of points that fall OUTSIDE the scene_occluded_mask
+                        or outside the image bounds or behind the camera.
+        """
+        device = points_3d.device
+        H, W = self.image_height, self.image_width
+        N = points_3d.shape[0]
+
+        # ===== 1. World → Camera transform =====
+        ones = torch.ones((N, 1), device=device, dtype=points_3d.dtype)
+        pts_h = torch.cat([points_3d, ones], dim=-1)        # (N,4)
+        cam = pts_h @ self.w2c.to(device).T                # (N,4)
+
+        Xc = cam[:, 0]
+        Yc = cam[:, 1]
+        Zc = cam[:, 2]
+
+        # Depth must be positive
+        valid_depth = Zc > 0
+
+        # ===== 2. Project using intrinsics =====
+        K = self.intrinsics.to(device)
+        fx, fy = K[0, 0], K[1, 1]
+        cx, cy = K[0, 2], K[1, 2]
+
+        u = fx * (Xc / Zc) + cx
+        v = fy * (Yc / Zc) + cy
+
+        # ===== 3. Safe rounding for mask sampling =====
+        u_pix = torch.floor(u).long()
+        v_pix = torch.floor(v).long()
+
+        # ===== 4. Valid screen coords AFTER rounding =====
+        in_bounds = (
+            (u_pix >= 0) & (u_pix < W) &
+            (v_pix >= 0) & (v_pix < H)
+        )
+
+        # Geometric validity (screen bounds + depth)
+        valid_geom = valid_depth & in_bounds
+
+        # ===== 5. Sample occlusion mask =====
+        mask = self.sceneoccluded_mask.to(device)[0]    # (H, W)
+
+        outside_mask = torch.ones(N, dtype=torch.bool, device=device)  # default: outside
+
+        if valid_geom.any():
+            sampled = mask[v_pix[valid_geom], u_pix[valid_geom]]
+            # mask = 1 → inside, mask = 0 → outside
+            outside_mask[valid_geom] = (sampled == 0)
+
+        # ===== 6. Final outside set =====
+        # outside if geom invalid OR mask says outside
+        outside_idx = torch.where(~valid_geom | outside_mask)[0]
+
+        return outside_idx

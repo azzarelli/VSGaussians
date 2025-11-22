@@ -357,41 +357,44 @@ def generate_circular_cams(
 
     # --- extract camera basis (columns of R are world-space camera axes)
     fp = os.path.join(path, 'meta/video_paths.json')
-    with open(fp, "r") as json_file:
-        contents = json.load(json_file)
+    try:
+        with open(fp, "r") as json_file:
+            contents = json.load(json_file)
 
-    zoomscale = 0.65
-    # --- recompute fx, fy from that new FOV
-    fx_new = cam.fx*zoomscale
-    fy_new = cam.fy*zoomscale
-    cams=[]
-    for idx, info in enumerate(contents['camera_path']):
-        #
-        c2w = np.array(info["camera_to_world"], dtype=np.float32).reshape(4, 4)
+        zoomscale = 0.65
+        # --- recompute fx, fy from that new FOV
+        fx_new = cam.fx*zoomscale
+        fy_new = cam.fy*zoomscale
+        cams=[]
+        for idx, info in enumerate(contents['camera_path']):
+            #
+            c2w = np.array(info["camera_to_world"], dtype=np.float32).reshape(4, 4)
 
-        R = c2w[:3, :3]
-        T = c2w[:3, 3]
+            R = c2w[:3, :3]
+            T = c2w[:3, 3]
 
-        cam_info = CameraInfo(
-                    uid=cam.uid, 
-                    R=R, T=T,
-                    
-                    fx=fx_new,
-                    fy=fy_new,
-                    cx=cam.cx, cy=cam.cy,
-                    k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
+            cam_info = CameraInfo(
+                        uid=cam.uid, 
+                        R=R, T=T,
+                        
+                        fx=fx_new,
+                        fy=fy_new,
+                        cx=cam.cx, cy=cam.cy,
+                        k1=cam.k1, k2=cam.k2, p1=cam.p1, p2=cam.p2,
 
-                    width=cam.width, height=cam.height,
-                    image=None,
-                    canon=None,
-                    mask=None,
-                    image_path=None, 
-                    canon_path=None,
-                    so_path=None,
-                    time=idx,
-                )
-        
-        cams.append(cam_info)
+                        width=cam.width, height=cam.height,
+                        image=None,
+                        canon=None,
+                        mask=None,
+                        image_path=None, 
+                        canon_path=None,
+                        so_path=None,
+                        time=idx,
+                    )
+            
+            cams.append(cam_info)
+    except:
+        cams = None
     return cams
 
 def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[-1, -1, -1]):
@@ -405,7 +408,7 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs) 
     
     # split into training and test dataset
-    V_cam = 11
+    V_cam = 5
     L_test_idx_set = [8, 12, 27, 36, 48, 55, 61, 71, 81, 98] # The lighting-only test set
     V_test_idx_set = [(V_cam*100)+i for i in range(100) if i not in L_test_idx_set] # The novel-view only test set
     LV_test_idx_set = [(V_cam*100)+i for i in range(100) if i in L_test_idx_set] # The novel-view & novel lighting test set
@@ -484,6 +487,195 @@ def readNerfstudioInfo(path, N=98, preload_imgs=False, additional_dataset_args=[
     )
     return scene_info
 
+def readScene2Info(path, N=98, preload_imgs=False, additional_dataset_args=[-1, -1, -1]):
+    """Construct dataset from nerfstudio
+    """
+    print("Reading nerfstudio data ...")
+    # Read camera transforms    
+    canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
+    
+    # L is the number of background paths
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs)  # L should be 99
+    
+    # split into training and test dataset
+    V_cam = 18
+    L_test_idx_set = [i for i in range(9)] # The lighting-only test set
+    V_test_idx_set = [(V_cam*N)+i for i in range(N) if i not in L_test_idx_set] # The novel-view only test set
+    LV_test_idx_set = [(V_cam*N)+i for i in range(N) if i in L_test_idx_set] # The novel-view & novel lighting test set
+    
+    # Load the split datasets
+    L_test_cams = [cam for idx, cam in enumerate(cam_infos)  if (idx % L) in L_test_idx_set and idx not in LV_test_idx_set] # For indexs n the lighting test set
+    V_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in V_test_idx_set] # For indexs in the novel view test set
+    LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
+    test_cams = [L_test_cams, V_test_cams, LV_test_cams]
+
+    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
+
+    # Select cameras with a common background for pose estimation (from the training set)
+    selected_background_fp = background_paths[0]
+
+    # Camera path for novel view
+    video_cams = generate_circular_cams(path, cam_infos[V_cam])
+    if video_cams is None: # TODO: Add script for video paths for this scene
+        video_cams = test_cams
+        
+    nerf_normalization = getNerfppNorm(relighting_cams)
+    
+    
+    # Now process relighting cams based on desired dataset arguments for testing
+    num_cams = additional_dataset_args[0]
+    num_textures = additional_dataset_args[1]
+    texture_block = additional_dataset_args[2]
+    
+    n_frames_max = L-len(L_test_idx_set)
+    # Only implement what is necessary num cams 6, 12, 18, num_frames 1, 10, 30, 90
+    if num_cams != -1:
+        if num_cams == 6:
+            # Options
+            selected_cams_ = [14,2,12,10,6,7]
+        elif num_cams == 12:
+            selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 18, 5]
+            
+        else:
+            print('No implement error: a invalid --num-cams value was provided')
+            exit()
+        relighting_cams_ = []
+        for i, s in enumerate(selected_cams_):
+            # Remeber that we removed the test cam already so now we have to account for that in our indexing
+            if s > V_cam:
+                s = s-1
+            
+            s = s*n_frames_max
+            
+            for j in range(n_frames_max):
+                relighting_cams_.append(relighting_cams[s+j])
+        # update list
+        relighting_cams = relighting_cams_
+
+    
+    if num_textures != -1: 
+        # Generate list of texture indexs to sample based on inputs
+        texture_index = [(texture_block*num_textures)+i for i in range(num_textures)]
+        
+        relighting_cams_ = []
+        for i, cam in enumerate(relighting_cams):
+            if (i % n_frames_max) in texture_index:
+                relighting_cams_.append(cam)
+            
+        
+        relighting_cams = relighting_cams_
+
+    scene_info = SceneInfo(
+        train_cameras=relighting_cams,
+        test_cameras=test_cams,
+        video_cameras=video_cams,
+        
+        ba_background_fp=selected_background_fp,
+        
+        nerf_normalization=nerf_normalization,
+        background_pth_ids=background_paths,
+
+        param_path=os.path.join(path, 'splat','splat.ply'),
+
+    )
+    return scene_info
+
+
+
+def readScene3Info(path, N=98, preload_imgs=False, additional_dataset_args=[-1, -1, -1]):
+    """Construct dataset from nerfstudio
+    """
+    print("Reading nerfstudio data ...")
+    # Read camera transforms    
+    canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
+    
+    # L is the number of background paths
+    cam_infos, background_paths, L = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs)  # L should be 99
+    
+    # split into training and test dataset
+    V_cam = 18
+    L_test_idx_set = [i for i in range(9)] # The lighting-only test set
+    V_test_idx_set = [(V_cam*N)+i for i in range(N) if i not in L_test_idx_set] # The novel-view only test set
+    LV_test_idx_set = [(V_cam*N)+i for i in range(N) if i in L_test_idx_set] # The novel-view & novel lighting test set
+    
+    # Load the split datasets
+    L_test_cams = [cam for idx, cam in enumerate(cam_infos)  if (idx % L) in L_test_idx_set and idx not in LV_test_idx_set] # For indexs n the lighting test set
+    V_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in V_test_idx_set] # For indexs in the novel view test set
+    LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
+    test_cams = [L_test_cams, V_test_cams, LV_test_cams]
+
+    relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
+
+    # Select cameras with a common background for pose estimation (from the training set)
+    selected_background_fp = background_paths[0]
+
+    # Camera path for novel view
+    video_cams = generate_circular_cams(path, cam_infos[V_cam])
+    if video_cams is None: # TODO: Add script for video paths for this scene
+        video_cams = test_cams
+        
+    nerf_normalization = getNerfppNorm(relighting_cams)
+    
+    
+    # Now process relighting cams based on desired dataset arguments for testing
+    num_cams = additional_dataset_args[0]
+    num_textures = additional_dataset_args[1]
+    texture_block = additional_dataset_args[2]
+    
+    n_frames_max = L-len(L_test_idx_set)
+    # Only implement what is necessary num cams 6, 12, 18, num_frames 1, 10, 30, 90
+    if num_cams != -1:
+        if num_cams == 6:
+            # Options
+            selected_cams_ = [14,2,12,10,6,7]
+        elif num_cams == 12:
+            selected_cams_ = [1,10, 9, 2, 14, 13, 0, 7, 9, 4, 18, 5]
+            
+        else:
+            print('No implement error: a invalid --num-cams value was provided')
+            exit()
+        relighting_cams_ = []
+        for i, s in enumerate(selected_cams_):
+            # Remeber that we removed the test cam already so now we have to account for that in our indexing
+            if s > V_cam:
+                s = s-1
+            
+            s = s*n_frames_max
+            
+            for j in range(n_frames_max):
+                relighting_cams_.append(relighting_cams[s+j])
+        # update list
+        relighting_cams = relighting_cams_
+
+    
+    if num_textures != -1: 
+        # Generate list of texture indexs to sample based on inputs
+        texture_index = [(texture_block*num_textures)+i for i in range(num_textures)]
+        
+        relighting_cams_ = []
+        for i, cam in enumerate(relighting_cams):
+            if (i % n_frames_max) in texture_index:
+                relighting_cams_.append(cam)
+            
+        
+        relighting_cams = relighting_cams_
+
+    scene_info = SceneInfo(
+        train_cameras=relighting_cams,
+        test_cameras=test_cams,
+        video_cameras=video_cams,
+        
+        ba_background_fp=selected_background_fp,
+        
+        nerf_normalization=nerf_normalization,
+        background_pth_ids=background_paths,
+
+        param_path=os.path.join(path, 'splat','splat.ply'),
+
+    )
+    return scene_info
+
+
 
 def readTensoir(path, additional_dataset_args=[-1, -1, -1]):
     """Construct dataset from nerfstudio
@@ -529,5 +721,7 @@ def readTensoir(path, additional_dataset_args=[-1, -1, -1]):
 
 sceneLoadTypeCallbacks = {
     "nerfstudio": readNerfstudioInfo,
+    "scene2": readScene2Info,
+    "scene3":readScene3Info,
     "tensoir": readTensoir
 }

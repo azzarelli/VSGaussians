@@ -24,7 +24,7 @@ else
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \
     --expname "$SAVEDIR/$EXP_NAME" \
     --configs arguments/baseline.py \
-    --test_iterations 20 \
+    --test_iterations 2000 \
     --num-cams $3 \
     --num-textures $4 \
     --num-textures-block $5
