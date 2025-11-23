@@ -13,12 +13,12 @@ else
   exit 1
 fi
 
-if [ "$3" == "view" ]; then
+if [ "$4" == "view" ]; then
   echo "Viewing..."
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \
     --expname "$SAVEDIR/$EXP_NAME" \
     --configs arguments/baseline.py \
-    --start_checkpoint "$4" --view-test
+    --start_checkpoint "$5" --view-test
 else
   echo "Training starting..."
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \

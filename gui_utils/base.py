@@ -9,7 +9,7 @@ import os
 import copy
 import psutil
 import torch
-from gaussian_renderer import render, render_IBL_source
+from gaussian_renderer import render, render_ibl_pose_points
 from tqdm import tqdm
 import time
 import json
@@ -63,11 +63,13 @@ class GUIBase:
         
         # Rendering/Novel View Settings
         self.novel_view_background_dir = ""
-        self.ba_mask_flag = False
+        self.drag_func = "viewing"
+        self.drag_im_buffer = None
         self.trainable_abc = None
         
         # Analysis/Inspection tools
         self.mous_loc = [0, 0] # x,y
+        self.mous_loc_last = [0, 0] # x,y
 
         # Viewer settings for camera/view selection
         self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
@@ -99,7 +101,6 @@ class GUIBase:
             f'[{self.stage} {self.iteration}] Time: {time:.2f} | Allocated Memory: {allocated:.2f} MB, Reserved Memory: {reserved:.2f} MB | CPU Memory Usage: {memory_mb:.2f} MB')
     
     def render(self):
-        self.switch_off_viewer = False            
         cnt = 0
         if self.gui:
             while dpg.is_dearpygui_running():
@@ -214,12 +215,17 @@ class GUIBase:
                     cnt = 1
 
                 with torch.no_grad():
-                    if self.switch_off_viewer == False:
-                        self.viewer_step()
-                        dpg.render_dearpygui_frame()    
-                    elif self.play_custom_video:
+                    if self.play_custom_video:
                         self.play_video()
                         self.switch_off_viewer = False
+                          
+                    elif self.switch_off_viewer == False:
+                        self.viewer_step()
+                        dpg.render_dearpygui_frame()   
+                    else:
+                        dpg.render_dearpygui_frame()   
+
+                    
                 with torch.no_grad():
                     self.timer.pause() # log and save
                     torch.cuda.synchronize()
@@ -349,11 +355,20 @@ class GUIBase:
         except:
             print(f'Mode "{self.vis_mode}" does not work')
             buffer_image = buffer_image['render']
+        
+        # Render texture ABC vertices
+        if self.drag_func == "ibl-pose":
+            abc_rgba = render_ibl_pose_points(
+                cam,
+                abc,
+                mip_level=self.opt.mip_level
+            )
+            self.drag_im_buffer = abc_rgba
             
-        # if buffer_image.shape[0] == 1:
-        #     buffer_image = (buffer_image - buffer_image.min())/(buffer_image.max() - buffer_image.min())
-        #     buffer_image = buffer_image.repeat(3,1,1)
-        try:# 
+            buffer_image = abc_rgba[-1, ...]*abc_rgba[:3, ...] +(1. - abc_rgba[-1, ...]) * buffer_image
+        
+        # Display value of image at current mouse position
+        try:
             mous_hover_value = buffer_image[:, self.mous_loc[1], self.mous_loc[0]]
         except:
             mous_hover_value = [0.]
@@ -504,12 +519,32 @@ class GUIBase:
         import matplotlib.pyplot as plt
         import numpy as np
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
+        import json
         # Initialize ABC
         # TL, TR, BL
+        # Scene 1
         init = torch.tensor([[-0.152, 0.73, 0.174],
                              [0.461, 0.50, 0.18],
                              [-0.126, 0.79, -0.18]])
+        
+        # init = torch.tensor([[-0.8742,1.819,-0.1954],
+        #                      [1.377, 1.456,0.310],
+        #                      [-0.976,1.739,0.368]])
+        
+        # Check to see if data is stored on the ibl pose:
+  
+        with open(os.path.join(self.args.source_path,'transforms.json')) as dict_json:
+            dic = json.load(dict_json)
+            
+        if "ibl_abc" not in dic.keys():
+            # Project image infrom of first camera
+            init = torch.tensor([[-0.976,1.739,0.368],
+                                [1.377, 1.456,0.310],
+                                 [-0.8742,1.819,-0.1954]
+                                ])
+        else:
+            init = torch.tensor(dic["ibl_abc"])
+
         print(f"Texture ABC : {init}")
         self.abc = ABC(init.cuda())
 
@@ -586,80 +621,99 @@ class GUIBase:
                     dpg.add_text("N/A", tag="_log_fine2")
 
                     dpg.add_text("N/A", tag="_log_points")
-                else:
-                    dpg.add_text("Training info: (Not training)")
+                    with dpg.collapsing_header(label="Testing info:", default_open=True):
+                        with dpg.group(horizontal=True):
+                            dpg.add_text("Progress : ")
+                            dpg.add_text("N/A", tag="_log_test_progress")
 
-
-            with dpg.collapsing_header(label="Testing info:", default_open=True):
-                with dpg.group(horizontal=True):
-                    dpg.add_text("Progress : ")
-                    dpg.add_text("N/A", tag="_log_test_progress")
-
-                dpg.add_text("Lighting-only : ")
-                dpg.add_text("N/A", tag="_log_l_1")
-                dpg.add_text("N/A", tag="_log_l_2")
-                dpg.add_text("N/A", tag="_log_l_3")
-                dpg.add_text("N/A", tag="_log_l_4")
-                dpg.add_text("N/A", tag="_log_l_5")
-                dpg.add_text("View-only : ")
-                dpg.add_text("N/A", tag="_log_v_1")
-                dpg.add_text("N/A", tag="_log_v_2")
-                dpg.add_text("N/A", tag="_log_v_3")
-                dpg.add_text("View & Lighting : ")
-                dpg.add_text("N/A", tag="_log_lv_1")
-                dpg.add_text("N/A", tag="_log_lv_2")
-                dpg.add_text("N/A", tag="_log_lv_3")
-                dpg.add_text("N/A", tag="_log_lv_4")
-                dpg.add_text("N/A", tag="_log_lv_5")
+                        dpg.add_text("Lighting-only : ")
+                        dpg.add_text("N/A", tag="_log_l_1")
+                        dpg.add_text("N/A", tag="_log_l_2")
+                        dpg.add_text("N/A", tag="_log_l_3")
+                        dpg.add_text("N/A", tag="_log_l_4")
+                        dpg.add_text("N/A", tag="_log_l_5")
+                        dpg.add_text("View-only : ")
+                        dpg.add_text("N/A", tag="_log_v_1")
+                        dpg.add_text("N/A", tag="_log_v_2")
+                        dpg.add_text("N/A", tag="_log_v_3")
+                        dpg.add_text("View & Lighting : ")
+                        dpg.add_text("N/A", tag="_log_lv_1")
+                        dpg.add_text("N/A", tag="_log_lv_2")
+                        dpg.add_text("N/A", tag="_log_lv_3")
+                        dpg.add_text("N/A", tag="_log_lv_4")
+                        dpg.add_text("N/A", tag="_log_lv_5")
                     
+                else:
+                    dpg.add_text("Mode : viewing")
+
+            
+                
+                        
 
             # ----------------
             #  Control Functions
             # ----------------
             with dpg.collapsing_header(label="Viewer Config", default_open=True):
-                def callback_toggle_show_rgb(sender):
-                    self.switch_off_viewer = ~self.switch_off_viewer
-                def callback_toggle_finecoarse(sender):
-                    self.finecoarse_flag = False if self.finecoarse_flag else True
+                def callback_viewer_on(sender):
+                    self.switch_off_viewer = False
                     
+                def callback_viewer_off(sender):
+                    self.switch_off_viewer = True
+                    
+                def callback_on_finecoarse(sender):
+                    self.finecoarse_flag = False
+                def callback_off_finecoarse(sender):
+                    self.finecoarse_flag = True
+                dpg.add_text(" : Main Settings : ")
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Pause/Play Viewer ")
-                    dpg.add_button(label="||>", callback=callback_toggle_show_rgb)  
-                
-                with dpg.group(horizontal=True):
-                    dpg.add_text("View Relighting Scene")
-                    dpg.add_button(label="--", callback=callback_toggle_finecoarse)
+                    dpg.add_text("Viewer : ")
+                    dpg.add_button(label="On", callback=callback_viewer_on)  
+                    dpg.add_button(label="Off", callback=callback_viewer_off)  
+                    dpg.add_text(" | Relighting : ")
+                    dpg.add_button(label="On", callback=callback_on_finecoarse)
+                    dpg.add_button(label="Off", callback=callback_off_finecoarse)
+                   
                      
                 def callback_toggle_reset_cam(sender):
                     self.current_cam_index = 0
                     
                 def callback_toggle_next_cam(sender):
                     self.current_cam_index = (self.current_cam_index + 1) % len(self.free_cams)
-                    
+                def callback_toggle_before_cam(sender):
+                    diff = (self.current_cam_index - 1)
+                    if diff < 0: 
+                        self.current_cam_index = len(self.free_cams) -1
+                    else:
+                        self.current_cam_index = diff % len(self.free_cams)
+                
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Reset cam", callback=callback_toggle_reset_cam)
+                    dpg.add_button(label="<<", callback=callback_toggle_before_cam)
                     dpg.add_text("N/A", tag="_log_view_camera")
-                    dpg.add_button(label="Next cam", callback=callback_toggle_next_cam)
+                    dpg.add_button(label=">>", callback=callback_toggle_next_cam)
 
                 def callback_toggle_reset_cam(sender):
                     for i in range(len(self.free_cams)):
                         self.free_cams[i] = copy.deepcopy(self.original_cams[i])
                     self.current_cam_index = 0
+                
                 def callback_toggle_save_frame(sender):
-                    self.save_frame = True
+                        self.save_frame = True
+                dpg.add_text(": Frame Settings : ")
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Reset Fov", callback=callback_toggle_reset_cam)
-                    dpg.add_button(label="Save Frame", callback=callback_toggle_save_frame)
+                    dpg.add_button(label="save", callback=callback_toggle_save_frame)
+
+                    dpg.add_button(label="reset", callback=callback_toggle_reset_cam)
+                    dpg.add_button(label="reset (FOV)", callback=callback_toggle_reset_cam)
 
                 def callback_toggle_sceneocc_mask(sender):
                     self.show_mask = 'occ'
                 def callback_toggle_no_mask(sender):
                     self.show_mask = 'none'
-                    
+
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Show/Unshow Masks")
-                    dpg.add_button(label="No Mask", callback=callback_toggle_no_mask)
-                    dpg.add_button(label="Occlu Mask", callback=callback_toggle_sceneocc_mask)
+                    dpg.add_text("Masks : ")
+                    dpg.add_button(label="On", callback=callback_toggle_sceneocc_mask)
+                    dpg.add_button(label="Off", callback=callback_toggle_no_mask)
                     
                 
                 def callback_toggle_show_rgb(sender):
@@ -679,24 +733,28 @@ class GUIBase:
                 def callback_toggle_show_deform(sender):
                     self.vis_mode = 'deform'
 
+                dpg.add_text(" : Appearance Buffers : ")
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
-                    dpg.add_button(label="Alpha", callback=callback_toggle_show_alpha)
-                    dpg.add_button(label="Invar", callback=callback_toggle_show_invariance)
-                    dpg.add_button(label="Deform", callback=callback_toggle_show_deform)
+                    dpg.add_button(label="α", callback=callback_toggle_show_alpha)
+                    dpg.add_button(label="λ", callback=callback_toggle_show_invariance)
+                    dpg.add_button(label="µ", callback=callback_toggle_show_invariance)
+                    dpg.add_button(label="δ", callback=callback_toggle_show_invariance)
+                    dpg.add_button(label="Δc", callback=callback_toggle_show_deform)
                 
+                dpg.add_text(" : Geometry Buffers : ")
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="D", callback=callback_toggle_show_depth)
-                    dpg.add_button(label="ED", callback=callback_toggle_show_edepth)
-                    dpg.add_button(label="2D", callback=callback_toggle_show_2dgsdepth)
+                    dpg.add_button(label="Zc", callback=callback_toggle_show_depth)
+                    dpg.add_button(label="𝔼[Zc]", callback=callback_toggle_show_edepth)
+                    dpg.add_button(label="Zc", callback=callback_toggle_show_2dgsdepth)
                     dpg.add_button(label="XYZ", callback=callback_toggle_show_XYZ)
 
                 
                 def callback_speed_control(sender):
                     self.time = int(dpg.get_value(sender)*100)
-                    
+                dpg.add_text(" : Select IBL (image) : ")
                 dpg.add_slider_float(
-                    label="Time",
+                    label="IBL",
                     default_value=0.,
                     max_value=1.,
                     min_value=0.,
@@ -706,52 +764,32 @@ class GUIBase:
             if self.view_test:
                 with dpg.collapsing_header(label="Rendering Processing", default_open=True):
                     
-                    def callback_activate_run_ba_mask(sender):
-                        self.ba_mask_flag = ~ self.ba_mask_flag
+                    def callback_iblpose_on(sender):
+                        self.drag_func = "ibl-pose"
+                    def callback_iblpose_off(sender):
+                        self.drag_func = "viewing"
 
-                    input_size_xyz = 40
+                    dpg.add_text(" : Configure IBL : ")
                     with dpg.group(horizontal=True):
-                        dpg.add_button(label="Run IBL Posing (bundle adj.)" , callback=callback_activate_run_ba_mask)
+                        dpg.add_text("Pose IBL : ")
+                        dpg.add_button(label="On" , callback=callback_iblpose_on)
+                        dpg.add_button(label="Off" , callback=callback_iblpose_off)
 
-                    def on_text_change_ax(sender, app_data, user_data):
-                        self.abc.abc[0,0] = float(app_data)
-                    def on_text_change_ay(sender, app_data, user_data):
-                        self.abc.abc[0,1] = float(app_data)
-                    def on_text_change_az(sender, app_data, user_data):
-                        self.abc.abc[0,2] = float(app_data)
-                    with dpg.group(horizontal=True):
-                        dpg.add_text("Top-Left : ")
-                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_ax)
-                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_ay)
-                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_az)
+                    def callback_iblpose_save(sender):
+                        # Open the transforms file
+                        with open(os.path.join(self.args.source_path,'transforms.json')) as dict_json:
+                            dic = json.load(dict_json)
 
-                    def on_text_change_bx(sender, app_data, user_data):
-                        self.abc.abc[1,0] = float(app_data)
-                    def on_text_change_by(sender, app_data, user_data):
-                        self.abc.abc[1,1] = float(app_data)
-                    def on_text_change_bz(sender, app_data, user_data):
-                        self.abc.abc[1,2] = float(app_data)
+                        dic["ibl_abc"] = self.abc.abc.cpu().tolist()
+                        with open(os.path.join(self.args.source_path,'transforms.json'), "w") as dict_json:
+                            dic = json.dump(dic, dict_json)
+                        
                     with dpg.group(horizontal=True):
-                        dpg.add_text("Top-Righ : ")
-                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_bx)
-                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_by)
-                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_bz)
-                    
-                    def on_text_change_cx(sender, app_data, user_data):
-                        self.abc.abc[2,0] = float(app_data)
-                    def on_text_change_cy(sender, app_data, user_data):
-                        self.abc.abc[2,1] = float(app_data)
-                    def on_text_change_cz(sender, app_data, user_data):
-                        self.abc.abc[2,2] = float(app_data)
-                    with dpg.group(horizontal=True):
-                        dpg.add_text("Bot-Left : ")
-                        dpg.add_input_text(width=input_size_xyz,label="+x" , callback=on_text_change_cx)
-                        dpg.add_input_text(width=input_size_xyz,label="+y" , callback=on_text_change_cy)
-                        dpg.add_input_text(width=input_size_xyz,label="+z" , callback=on_text_change_cz)
+                        dpg.add_text("Save pose : ")
+                        dpg.add_button(label="save" , callback=callback_iblpose_save)
                     
                     def on_text_change(sender, app_data, user_data):
                         self.novel_view_background_dir = app_data
-                        print(self.novel_view_background_dir)
                         
                     def callback_toggle_render_novel_view(sender):
                         self.switch_off_viewer = True
@@ -761,9 +799,10 @@ class GUIBase:
                         self.switch_off_viewer = True
                         self.play_custom_video = True
                         self.save_custom_video = True
-                        
+                    
+                    dpg.add_text(" : Inset video IBL : ") 
                     with dpg.group(horizontal=True):
-                        dpg.add_text("background fp : ")
+                        dpg.add_text("Filepath : ")
                         dpg.add_input_text(callback=on_text_change)
                     
                     with dpg.group(horizontal=True):
@@ -774,71 +813,129 @@ class GUIBase:
             delta = app_data  # scroll: +1 = up (zoom in), -1 = down (zoom out)
             cam = self.free_cams[self.current_cam_index]
 
-            zoom_scale = 0.5  # Smaller = faster zoom
+            zoom_scale = 0.8  # Smaller = faster zoom
 
             # Scale FoV within limits
             cam.fx *= zoom_scale if delta > 0 else 1 / zoom_scale
             cam.fy *= zoom_scale if delta > 0 else 1 / zoom_scale
             cam.update_K()
 
-
         def drag_callback(sender, app_data):
-            # app_data = (button, rel_x, rel_y)
-            # button: 0=left, 1=right, 2=middle
-            button, rel_x, rel_y = app_data
+            # if we haven't initialized the drag image buffer
+            if self.drag_im_buffer is not None:
+                mouse_hover_value = self.drag_im_buffer[:3, self.mous_loc[1], self.mous_loc[0]].sum()
+            else:
+                mouse_hover_value = 0.
+            view_drag_thresh = 0.5
             
-            if button != 0:  # only left drag
-                return
-
-            # simply check inside primary window dimensions
-            if dpg.get_active_window() != dpg.get_alias_id("_primary_window"):
-                return
+            if mouse_hover_value < view_drag_thresh:
+                button, rel_x, rel_y = app_data
             
-            cam = self.free_cams[self.current_cam_index]
+                if button != 0:  # only left drag
+                    return
 
-            if not hasattr(cam, "yaw"): cam.yaw = 0.0
-            if not hasattr(cam, "pitch"): cam.pitch = 0.0
-    
-            # Sensitivity
-            yaw_speed = 0.0001
-            pitch_speed = 0.0001
+                # simply check inside primary window dimensions
+                if dpg.get_active_window() != dpg.get_alias_id("_primary_window"):
+                    return
+                
+                cam = self.free_cams[self.current_cam_index]
 
-            cam.yaw = -rel_x * yaw_speed
-            cam.pitch = -rel_y * pitch_speed
-            cam.pitch = np.clip(cam.pitch, -np.pi/2 + 0.01, np.pi/2 - 0.01)  # avoid flip
-
-            # --- Rebuild rotation matrix from angles ---
-            cy, sy = np.cos(cam.yaw), np.sin(cam.yaw)
-            cp, sp = np.cos(cam.pitch), np.sin(cam.pitch)
-
-            # Yaw (around world Y), Pitch (around local X)
-            Ry = np.array([
-                [cy, 0, sy],
-                [0, 1, 0],
-                [-sy, 0, cy]
-            ], dtype=np.float32)
-
-            Rx = np.array([
-                [1, 0, 0],
-                [0, cp, -sp],
-                [0, sp, cp]
-            ], dtype=np.float32)
-
-            cam.R = cam.R @ Ry @ Rx 
+                if not hasattr(cam, "yaw"): cam.yaw = 0.0
+                if not hasattr(cam, "pitch"): cam.pitch = 0.0
         
+                # Sensitivity
+                yaw_speed = 0.0001
+                pitch_speed = 0.0001
+
+                cam.yaw = rel_x * yaw_speed
+                cam.pitch = -rel_y * pitch_speed
+                cam.pitch = np.clip(cam.pitch, -np.pi/2 + 0.01, np.pi/2 - 0.01)  # avoid flip
+
+                # --- Rebuild rotation matrix from angles ---
+                cy, sy = np.cos(cam.yaw), np.sin(cam.yaw)
+                cp, sp = np.cos(cam.pitch), np.sin(cam.pitch)
+
+                # Yaw (around world Y), Pitch (around local X)
+                Ry = np.array([
+                    [cy, 0, sy],
+                    [0, 1, 0],
+                    [-sy, 0, cy]
+                ], dtype=np.float32)
+
+                Rx = np.array([
+                    [1, 0, 0],
+                    [0, cp, -sp],
+                    [0, sp, cp]
+                ], dtype=np.float32)
+
+                cam.R = cam.R @ Ry @ Rx 
+            
+            if self.drag_func == "ibl-pose" and mouse_hover_value > view_drag_thresh:
+                # Need to do mouse-ray intersection to see if mouse lands on a abc
+                # Render top-layer for ibl-pose
+                # cache rgba of the Gsplat render, use the mouse-intersecting color to select a point to change
+                # as mouse moves, move the point w.r.t fixed distance from the camera
+                
+                # Select a vertex to move
+                mouse_hover_value = self.drag_im_buffer[:3, self.mous_loc[1], self.mous_loc[0]]
+                if mouse_hover_value[0] > view_drag_thresh: # Top left
+                    abc_index = 0
+                elif mouse_hover_value[1]> view_drag_thresh: # Top Right
+                    abc_index = 1
+                elif mouse_hover_value[2]> view_drag_thresh: # Bottom Left
+                    abc_index = 2
+                
+                xyz = self.abc.abc[abc_index].unsqueeze(-1)
+
+                # Project into 2-D to find the center w.r.t image space
+                cam = self.free_cams[self.current_cam_index]
+                intr = cam.intrinsics # 3x3
+                w2c = cam.w2c # 4x4
+                width = cam.image_width
+                height = cam.image_height
+                
+                R = w2c[:3, :3]
+                T = w2c[:3, 3:4]
+                Xc = R @ xyz + T
+                z = Xc[2]
+                
+                fx, fy = intr[0,0], intr[1,1]
+                cx,cy = intr[0,2], intr[1,2]
+                
+                # Get 2-D center for selected abc
+                u = fx*(Xc[0]/z) + cx
+                v = fy*(Xc[1]/z) + cy 
+                
+                dx = self.mous_loc[0] - self.mous_loc_last[0]
+                dy = self.mous_loc[1] - self.mous_loc_last[1]
+                # dx, dy = dpg.get_mouse_drag_delta()
+                u_ = u + dx
+                v_ = v + dy
+    
+                x_ = (u_ - cx)/fx
+                y_ = (v_ - cy)/fy
+                
+                Xc_ = torch.tensor([x_*z, y_*z, z]).unsqueeze(-1).cuda()
+                Xw = R.T @ (Xc_-T)
+                self.abc.abc[abc_index] = Xw.squeeze(-1)
+                            
         def mouse_hover_callback(sender, app_data):
             # app_data: (x, y) coordinates of mouse position in global viewport
             x, y = app_data
 
             if dpg.is_item_hovered("_primary_window"):
+                self.mous_loc_last = self.mous_loc
                 self.mous_loc = [int(x),int(y)]
                 dpg.set_value("_log_mouse_xy", f"({x:.1f}, {y:.1f})")
 
+        with dpg.group(horizontal=True, parent="_control_window"):
+            dpg.add_text(" : Mouse data : ")
         # Add text in the control window to display mouse coordinates
         with dpg.group(horizontal=True, parent="_control_window"):
-            dpg.add_text("Mouse Pos ")
+            dpg.add_text("Position : ")
             dpg.add_text("N/A", tag="_log_mouse_xy")
         with dpg.group(horizontal=True, parent="_control_window"):
+            dpg.add_text("Pixel Value : ")
             dpg.add_text("N/A", tag="_log_mouse_value")
             
         with dpg.handler_registry():

@@ -111,7 +111,6 @@ def make_cam_rays(camera):
 
     return origins_world, dirs_world
 
-
 def render_IBL_source(camera, abc, texture):
     H, W = camera.image_height, camera.image_width
 
@@ -125,6 +124,7 @@ def render_IBL_source(camera, abc, texture):
     # Calculate t intersection for each ray
     u = b-a
     v = c-a
+    
     normal = torch.cross(u, v, dim=-1)
     normal = F.normalize(normal, dim=-1).unsqueeze(-1)
 
@@ -137,11 +137,24 @@ def render_IBL_source(camera, abc, texture):
     x = origin + t * direction
 
     # Project onto u,v basis
-    u_len2 = (u * u).sum()
-    v_len2 = (v * v).sum()
-    d = x - a
-    u_coord = (d @ u) / u_len2   # [0,1] left→right
-    v_coord = (d @ v) / v_len2   # [0,1] bottom→top
+    # u_len2 = (u * u).sum()
+    # v_len2 = (v * v).sum()
+    # d = x - a
+    # u_coord = (d @ u) / u_len2   # [0,1] left→right
+    # v_coord = (d @ v) / v_len2   # [0,1] bottom→top
+    
+    d = x - a                                             # (N,3)
+
+    # Construct Gram matrix and its inverse
+    UV = torch.stack([u, v], dim=1)                       # (3,2)
+    G = UV.T @ UV                                          # (2,2)
+    G_inv = torch.inverse(G)
+
+    # Compute coefficients (u_coord, v_coord)
+    coeffs = (G_inv @ (UV.T @ d.T)).T                      # (N,2)
+
+    u_coord = coeffs[:, 0]
+    v_coord = coeffs[:, 1]
     
     # Only sample rays within patch
     mask = (u_coord >= 0) & (u_coord <= 1) & (v_coord >= 0) & (v_coord <= 1)
@@ -159,6 +172,23 @@ def render_IBL_source(camera, abc, texture):
     sampled = sampled * mask.unsqueeze(0)
 
     return sampled
+
+@torch.no_grad
+def render_ibl_pose_points(cam, abc, mip_level):
+    # Generate abc as gaussians to render
+    means = abc
+    rgb = abc.clone()*0.
+    rgb[[0,1,2],[0,1,2]] += 1.
+    opacity = means[:, 0].unsqueeze(-1)*0. + 1.
+    scales = abc.clone()*0. + .05
+    rotation = torch.cat([abc*0., abc[:,0].unsqueeze(-1)*0. + 1.], dim=-1)
+    
+    render, alpha, meta = rendering_pass(means, rotation, scales, opacity, rgb, 
+                                        None, cam, sh_deg=None, mode="RGB")
+    
+    rgba = torch.cat([render, alpha], dim=-1).squeeze(0).permute(2,0,1)
+    return rgba
+
 
 @torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blending_mask=None):
@@ -258,15 +288,15 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         render = render.squeeze(0)
         alpha = meta[1].squeeze(-1).squeeze(0)
         if abc is not None:
-            t1 = time.time()
+            # t1 = time.time()
             ibl = render_IBL_source(viewpoint_camera, abc, texture)
             # if blending_mask is not None:
             #     alpha = blending_mask.unsqueeze(0)
 
             
             render =  render * (alpha) + (1. - alpha) * ibl
-            t2 = time.time()
-            print( 1./(t2-t1))
+            # t2 = time.time()
+            # print( 1./(t2-t1))
         
     return {
         "render": render,

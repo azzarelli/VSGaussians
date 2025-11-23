@@ -441,29 +441,29 @@ class GaussianModel:
             texscale = texscale + 0.01*torch.rand_like(texscale)
             texscale = torch.logit(texscale)
 
-        # Filter out points not in the physical scene:
-        num_train_frames = int(len(cams) / (num_cams-1))
-        target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
+            # Filter out points not in the physical scene:
+            num_train_frames = int(len(cams) / (num_cams-1))
+            target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
 
-        xyz_mask = means[:, 0].clone()*0.
-        for cam in target_cams:
-            inds = cam.screenspace_xyz_search(means.cpu())
-            xyz_mask[inds] += 1
-        xyz_mask = (xyz_mask < 10).cuda()
-        
-        means = means[xyz_mask]
-        xyz_mask = xyz_mask.cpu().numpy()
-        scales = scales[xyz_mask]
-        rots = rots[xyz_mask]
-        opacities = opacities[xyz_mask]
-        features_dc = features_dc[xyz_mask]
-        features_extra = features_extra[xyz_mask]
-        
-        lambda_dc = lambda_dc[xyz_mask]
-        lambda_extra = lambda_extra[xyz_mask]
-        ab_dc = ab_dc[xyz_mask]
-        ab_extra = ab_extra[xyz_mask]
-        texscale = texscale[xyz_mask]
+            xyz_mask = means[:, 0].clone()*0.
+            for cam in target_cams:
+                inds = cam.screenspace_xyz_search(means.cpu())
+                xyz_mask[inds] += 1
+            xyz_mask = (xyz_mask < 10).cuda()
+            
+            means = means[xyz_mask]
+            xyz_mask = xyz_mask.cpu().numpy()
+            scales = scales[xyz_mask]
+            rots = rots[xyz_mask]
+            opacities = opacities[xyz_mask]
+            features_dc = features_dc[xyz_mask]
+            features_extra = features_extra[xyz_mask]
+            
+            lambda_dc = lambda_dc[xyz_mask]
+            lambda_extra = lambda_extra[xyz_mask]
+            ab_dc = ab_dc[xyz_mask]
+            ab_extra = ab_extra[xyz_mask]
+            texscale = texscale[xyz_mask]
 
         
         mean_foreground = means.mean(dim=0).unsqueeze(0)

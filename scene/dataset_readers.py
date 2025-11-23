@@ -279,7 +279,7 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
 
                         mask = 1. - TRANSFORM(img).cuda()
 
-                    time = background_id
+                    time = background_id - min_b_id
                     cam_info = CameraInfo(
                         uid=cam.uid, 
                         R=cam.R, T=cam.T,
@@ -625,7 +625,6 @@ def readScene3Info(path, preload_imgs=False, additional_dataset_args=1):
 
     # Select cameras with a common background for pose estimation (from the training set)
     selected_background_fp = background_paths[0]
-
     # Camera path for novel view
     video_cams = generate_circular_cams(path, cam_infos[V_cam])
     if video_cams is None: # TODO: Add script for video paths for this scene
