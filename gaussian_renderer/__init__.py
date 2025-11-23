@@ -18,7 +18,7 @@ def process_Gaussians(pc):
     
     return means3D, rotations, opacity, colors, scales
 
-def process_Gaussians_triplane(pc):
+def process_full_Gaussians(pc):
     # Use existing function for processing canon
     means3D, rotations, opacity, colors, scales = process_Gaussians(pc)
     
@@ -200,11 +200,11 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
     
     if view_args["finecoarse_flag"]:
 
-        if view_args['vis_mode'] not in ['invariance', 'deform']:
+        if view_args['vis_mode'] not in ['invariance', 'deform', 'uv', 'sigma']:
             means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
             invariance = None
         else:
-            means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_Gaussians_triplane(pc)
+            means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
             
             shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
             dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(texsample.shape[0], 1))
@@ -230,8 +230,12 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             mode = "D"
         elif view_args['vis_mode'] == 'ED':
             mode = "ED"
-        elif view_args['vis_mode'] == 'invariance':
+        elif view_args['vis_mode'] in ['invariance', 'uv', 'sigma']:
             mode = "invariance"
+            if view_args['vis_mode']  == 'uv':
+                invariance = texsample_ab
+            elif view_args['vis_mode']  == 'sigma':
+                invariance = texscale
         elif view_args['vis_mode'] == 'xyz':
             mean_max = means3D.max()
             mean_min = means3D.min()
@@ -276,7 +280,12 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             
         elif view_args['vis_mode'] == 'invariance':
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
-            
+        elif view_args['vis_mode'] == 'uv':
+            render = render.squeeze(0).permute(2,0,1)
+            render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
+        elif view_args['vis_mode'] == 'sigma':
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)*5.
+
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
         
@@ -310,7 +319,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     """
     # t1 = time.time()
     # Sample triplanes and return Gaussian params + a,b,lambda
-    means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_Gaussians_triplane(pc)
+    means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
     # t2 = time.time()
     # Precompute point a,b,s texture indexing
     colors_final = []

@@ -646,10 +646,6 @@ class GUIBase:
                 else:
                     dpg.add_text("Mode : viewing")
 
-            
-                
-                        
-
             # ----------------
             #  Control Functions
             # ----------------
@@ -730,22 +726,26 @@ class GUIBase:
                     self.vis_mode = 'xyz'
                 def callback_toggle_show_invariance(sender):
                     self.vis_mode = 'invariance'
+                def callback_toggle_show_uv(sender):
+                    self.vis_mode = 'uv'
+                def callback_toggle_show_sigma(sender):
+                    self.vis_mode = 'sigma'
                 def callback_toggle_show_deform(sender):
                     self.vis_mode = 'deform'
 
                 dpg.add_text(" : Appearance Buffers : ")
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
-                    dpg.add_button(label="α", callback=callback_toggle_show_alpha)
-                    dpg.add_button(label="λ", callback=callback_toggle_show_invariance)
-                    dpg.add_button(label="µ", callback=callback_toggle_show_invariance)
-                    dpg.add_button(label="δ", callback=callback_toggle_show_invariance)
-                    dpg.add_button(label="Δc", callback=callback_toggle_show_deform)
+                    dpg.add_button(label="A", callback=callback_toggle_show_alpha)
+                    dpg.add_button(label="inv", callback=callback_toggle_show_invariance)
+                    dpg.add_button(label="muv", callback=callback_toggle_show_uv)
+                    dpg.add_button(label="sca", callback=callback_toggle_show_sigma)
+                    dpg.add_button(label="def", callback=callback_toggle_show_deform)
                 
                 dpg.add_text(" : Geometry Buffers : ")
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Zc", callback=callback_toggle_show_depth)
-                    dpg.add_button(label="𝔼[Zc]", callback=callback_toggle_show_edepth)
+                    dpg.add_button(label="E[Zc]", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="Zc", callback=callback_toggle_show_2dgsdepth)
                     dpg.add_button(label="XYZ", callback=callback_toggle_show_XYZ)
 
