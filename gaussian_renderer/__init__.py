@@ -414,8 +414,7 @@ def render_canonical(viewpoint_camera, pc):
 import torch.nn.functional as F
 def generate_mipmaps(I, num_levels=3):
     I = I.unsqueeze(0)
-    pad_thickness = 1
-    maps = [F.pad(I, (pad_thickness, pad_thickness, pad_thickness, pad_thickness), value=0)]    
+    maps = [I]    
     for _ in range(1, num_levels):
         # I progressively downsampled
         I = F.interpolate(
@@ -424,7 +423,7 @@ def generate_mipmaps(I, num_levels=3):
             recompute_scale_factor=True
         )
         # Add zero padding
-        I_ = F.pad(I, (pad_thickness, pad_thickness, pad_thickness, pad_thickness), value=0)
+        I_ = I
         maps.append(I_)
     return maps
 
