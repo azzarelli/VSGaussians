@@ -37,8 +37,7 @@ class Deformation(nn.Module):
         self.spatial_enc = nn.Sequential(nn.Linear(self.grid.feat_dim,net_size))
 
         self.sample_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*2))
-        self.scaling_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 1))
-        self.invariance_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 3))
+        self.invariance_decoder = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*1))    
     
     def query_spacetime(self, rays_pts_emb):
         space = self.grid(rays_pts_emb[:,:3])
@@ -50,11 +49,10 @@ class Deformation(nn.Module):
 
         dyn_feature = self.query_spacetime(rays_pts_emb)
 
-        samples = torch.sigmoid(self.sample_decoder(dyn_feature)).view(-1, 16, 2)
-        invariance = torch.sigmoid(self.invariance_decoder(dyn_feature))
-        scaling = torch.sigmoid(self.scaling_decoder(dyn_feature))
+        samples = torch.sigmoid(self.sample_decoder(dyn_feature)).view(-1, 2, 16)
+        invariance = torch.sigmoid(self.invariance_decoder(dyn_feature)).view(-1, 1, 16)
 
-        return samples, scaling, invariance
+        return samples, invariance
     
     def get_mlp_parameters(self):
         parameter_list = []

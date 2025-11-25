@@ -213,11 +213,14 @@ class GUI(GUIBase):
         deform_loss = l1_loss(render, gt_out)
         canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
-        
+        planeloss = self.gaussians.compute_regulation(
+            self.hyperparams.time_smoothness_weight, self.hyperparams.l1_time_planes, self.hyperparams.plane_tv_weight,
+            self.hyperparams.minview_weight
+        )
         depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
         # depth_loss = 0.
         loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + 0.2*depth_loss
-                   
+        loss += planeloss                   
         with torch.no_grad():
             if self.gui:
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")

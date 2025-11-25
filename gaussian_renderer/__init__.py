@@ -22,11 +22,9 @@ def process_full_Gaussians(pc):
     # Use existing function for processing canon
     means3D, rotations, opacity, colors, scales = process_Gaussians(pc)
     
-    invariance = pc.get_lambda
-    texsample = pc.get_ab
-    texscale = pc.get_texscale
-        
-    return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
+    texsample, invariance = pc._deformation(means3D)
+    
+    return means3D, rotations, opacity, colors, scales, texsample, invariance
 
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
@@ -204,15 +202,15 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
             invariance = None
         else:
-            means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
+            means3D, rotation, opacity, colors, scales, texsample, invariance = process_full_Gaussians(pc)
             
-            shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
+            shs_view = texsample
             dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(texsample.shape[0], 1))
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
             
-            shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
+            shs_view = invariance
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
@@ -235,7 +233,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             if view_args['vis_mode']  == 'uv':
                 invariance = texsample_ab
             elif view_args['vis_mode']  == 'sigma':
-                invariance = texscale
+                invariance = texsample_ab
         elif view_args['vis_mode'] == 'xyz':
             mean_max = means3D.max()
             mean_min = means3D.min()
@@ -243,7 +241,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             colors = means3D.unsqueeze(0)
             
         elif view_args['vis_mode'] == 'deform':
-            colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
+            colors = sample_mipmap(texture, texsample_ab, None, num_levels=2).unsqueeze(0)
         
         # Change for rendering with rgb instead of shs
         if view_args['vis_mode'] in ["deform", "xyz"]:
@@ -284,8 +282,8 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1)
             render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
         elif view_args['vis_mode'] == 'sigma':
-            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)*5.
-
+            render = render.squeeze(0).permute(2,0,1)
+            render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
         
@@ -319,7 +317,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     """
     # t1 = time.time()
     # Sample triplanes and return Gaussian params + a,b,lambda
-    means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
+    means3D, rotation, opacity, colors, scales, texsample, invariance = process_full_Gaussians(pc)
     # t2 = time.time()
     # Precompute point a,b,s texture indexing
     colors_final = []
@@ -331,15 +329,15 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
 
-        shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
+        shs_view = texsample
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
+        shs_view = invariance
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
-        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=mip_level)
+        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, None, num_levels=mip_level)
         color_d = tex_invariance*colors_ibl
         colors_final.append((colors_precomp + color_d).unsqueeze(0))
         
