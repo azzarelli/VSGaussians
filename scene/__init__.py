@@ -64,11 +64,14 @@ class Scene:
             # Initialize the settings for doing bundle adjustment on IBL screen
             self.ba_background_path = scene_info.ba_background_fp
 
-            self.gaussians.load_ply(os.path.join(self.model_path,
-                                                        "point_cloud",
-                                                        "iteration_" + str(self.loaded_iter),
-                                                        "point_cloud.ply"),
-                                    opt)
+            self.gaussians.load_ply(
+                scene_info.param_path,
+                scene_info.param_path,
+                opt,
+                cams=self.train_camera,
+                num_cams=num_cams,
+                test=True
+            )
             self.gaussians.load_model(os.path.join(self.model_path,
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),

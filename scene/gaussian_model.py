@@ -323,11 +323,14 @@ class GaussianModel:
         return l
     
     def load_model(self, path):
-        print("No hexplane model for this branch {}".format(path))
+        print("loading model from exists{}".format(path))
+        weight_dict = torch.load(os.path.join(path,"deformation.pth"),map_location="cuda")
+        self._deformation.load_state_dict(weight_dict)
+        self._deformation = self._deformation.to("cuda")
         
     def save_deformation(self, path):
-        print("No hexplane model for this branch {}".format(path))
-    
+        torch.save(self._deformation.state_dict(),os.path.join(path, "deformation.pth"))
+        
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
 
@@ -349,7 +352,7 @@ class GaussianModel:
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
 
-    def load_ply(self, path, training_args, cams=None, num_cams=19):
+    def load_ply(self, path, training_args, cams=None, num_cams=19, test=False):
         
         plydata = PlyData.read(path)
 
@@ -396,22 +399,23 @@ class GaussianModel:
         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
         
-        num_train_frames = int(len(cams) / (num_cams-1))
-        target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
-        xyz_mask = means[:, 0].clone()*0.
-        for cam in target_cams:
-            inds = cam.screenspace_xyz_search(means.cpu())
-            xyz_mask[inds] += 1
-        xyz_mask = (xyz_mask < 1).cuda()
-        
-        means = means[xyz_mask]
-        xyz_mask = xyz_mask.cpu().numpy()
-        scales = scales[xyz_mask]
-        rots = rots[xyz_mask]
-        opacities = opacities[xyz_mask]
-        features_dc = features_dc[xyz_mask]
-        features_extra = features_extra[xyz_mask]
-        
+        if test == False:
+            num_train_frames = int(len(cams) / (num_cams-1))
+            target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
+            xyz_mask = means[:, 0].clone()*0.
+            for cam in target_cams:
+                inds = cam.screenspace_xyz_search(means.cpu())
+                xyz_mask[inds] += 1
+            xyz_mask = (xyz_mask < 1).cuda()
+            
+            means = means[xyz_mask]
+            xyz_mask = xyz_mask.cpu().numpy()
+            scales = scales[xyz_mask]
+            rots = rots[xyz_mask]
+            opacities = opacities[xyz_mask]
+            features_dc = features_dc[xyz_mask]
+            features_extra = features_extra[xyz_mask]
+            
         mean_foreground = means.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(means - mean_foreground, dim=1)
         self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy() /2.

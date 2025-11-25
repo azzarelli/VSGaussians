@@ -134,7 +134,7 @@ class GUIBase:
                                 dpg.render_dearpygui_frame()
 
                             dpg.stop_dearpygui()
-                            
+
                     # Test Step
                     if self.iteration % self.test_every == 0:
                         metrics = {
