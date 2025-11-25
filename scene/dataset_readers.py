@@ -375,7 +375,6 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
     """Construct dataset from nerfstudio
     """
     print(f"Reading {path.split('/')[-1]} & subset {additional_dataset_args} ...")
-    
     assert additional_dataset_args in [1,2,3], f"--subset needs to be [1,2,3]"
     assert N_test_frames >-1, f"--test-frames needs to be > -1"
     
@@ -387,12 +386,14 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
     
     L = len(background_paths)
     assert N_test_frames < L, f"--test-frames needs to be < {L} (the # of background textures)"
+    print(f" - using 0-{N_test_frames} for testing leaving {L- N_test_frames} for training")
 
     # split into training and test dataset
     if 'scene1' in path:
         V_cam = 5
     else:
         V_cam = 18
+    print(f" - using camera {V_cam} for testing novel view synthesis")
     
     # Split Test data into varios parts
     L_test_idx_set = [i for i in range(N_test_frames)] # The lighting-only test set (the first 10 frames for each camera)

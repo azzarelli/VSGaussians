@@ -441,7 +441,7 @@ class GaussianModel:
             texscale = texscale + 0.01*torch.rand_like(texscale)
             texscale = torch.logit(texscale)
 
-            # Filter out points not in the physical scene:
+            #### Filter out points not in the physical scene ####
             num_train_frames = int(len(cams) / (num_cams-1))
             target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
 
@@ -449,7 +449,7 @@ class GaussianModel:
             for cam in target_cams:
                 inds = cam.screenspace_xyz_search(means.cpu())
                 xyz_mask[inds] += 1
-            xyz_mask = (xyz_mask < 10).cuda()
+            xyz_mask = (xyz_mask < 1).cuda()
             
             means = means[xyz_mask]
             xyz_mask = xyz_mask.cpu().numpy()

@@ -179,7 +179,8 @@ class Camera(nn.Module):
         # ===== 5. Sample occlusion mask =====
         mask = self.sceneoccluded_mask.to(device)[0]    # (H, W)
 
-        outside_mask = torch.ones(N, dtype=torch.bool, device=device)  # default: outside
+        # outside_mask = torch.ones(N, dtype=torch.bool, device=device)  # default: outside
+        outside_mask = torch.zeros(N, dtype=torch.bool, device=device)  # default: inside
 
         if valid_geom.any():
             sampled = mask[v_pix[valid_geom], u_pix[valid_geom]]
@@ -188,6 +189,7 @@ class Camera(nn.Module):
 
         # ===== 6. Final outside set =====
         # outside if geom invalid OR mask says outside
-        outside_idx = torch.where(~valid_geom | outside_mask)[0]
+        # outside_idx = torch.where(~valid_geom | outside_mask)[0]
+        outside_idx = torch.where(outside_mask)[0]
 
         return outside_idx
