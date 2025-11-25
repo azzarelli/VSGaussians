@@ -362,6 +362,7 @@ import math
 def generate_circular_cams(
     path,
     cam,
+    idx_targets=None
 ):
     """
     Generate a circular camera path (all c2w) around a fixed point in front
@@ -380,8 +381,25 @@ def generate_circular_cams(
         fx_new = cam.fx*zoomscale
         fy_new = cam.fy*zoomscale
         cams=[]
+        if idx_targets is not None:
+            total_frame_length = len(contents['camera_path'])
+            total_background_files = len(idx_targets)
+            factor = int(total_frame_length/total_background_files) # floor the number of frames per background
+            
+            if factor < 1: # when total_frame_length < total_background_files
+                background_idxs = [idx_targets[i] for i in range(total_frame_length)]
+            else:
+                background_idxs = []
+                for i in range(total_background_files):
+                    for j in range(factor):
+                        background_idxs.append(i)
+                
+                # Now fill out any spacing left by flooring the factor
+                background_idxs = background_idxs + [idx_targets[-1] for i in range(total_frame_length - len(background_idxs))]
+        else:
+            background_idxs = [idx_targets[0] for i in range(len(contents['camera_path']))]
+            
         for idx, info in enumerate(contents['camera_path']):
-            #
             c2w = np.array(info["camera_to_world"], dtype=np.float32).reshape(4, 4)
 
             R = c2w[:3, :3]
@@ -403,9 +421,8 @@ def generate_circular_cams(
                         image_path=None, 
                         canon_path=None,
                         so_path=None,
-                        time=idx,
+                        time=background_idxs[idx],
                     )
-            
             cams.append(cam_info)
     except:
         cams = None
@@ -626,7 +643,7 @@ def readScene3Info(path, preload_imgs=False, additional_dataset_args=1):
     # Select cameras with a common background for pose estimation (from the training set)
     selected_background_fp = background_paths[0]
     # Camera path for novel view
-    video_cams = generate_circular_cams(path, cam_infos[V_cam])
+    video_cams = generate_circular_cams(path, cam_infos[V_cam], idx_targets=L_test_idx_set)
     if video_cams is None: # TODO: Add script for video paths for this scene
         print("No video cams defaulting to View only test data")
         video_cams = test_cams[1]

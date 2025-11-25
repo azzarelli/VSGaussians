@@ -209,10 +209,15 @@ class GUIBase:
                         
                     # Update iteration
                     self.iteration += 1
-
                 elif cnt ==0:
                     self.initialize_abc()
                     cnt = 1
+                    
+                    view_size=len(self.scene.video_camera)
+                    for i, test_cam in enumerate(self.scene.video_camera):
+                        metric_results = self.video_step(test_cam, i, abc=self.abc)
+                        dpg.render_dearpygui_frame()
+
 
                 with torch.no_grad():
                     if self.play_custom_video:
@@ -547,8 +552,6 @@ class GUIBase:
 
         print(f"Texture ABC : {init}")
         self.abc = ABC(init.cuda())
-
-
 
     def save_scene(self):
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))

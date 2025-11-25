@@ -22,7 +22,7 @@ from utils.timer import Timer
 
 from utils.loss_utils import l1_loss, ssim, l2_loss
 from utils.image_utils import psnr, mse, rgb_to_ycbcr
-from gaussian_renderer import render_extended
+from gaussian_renderer import render_extended, render_IBL_source
 
 
 
@@ -267,11 +267,11 @@ class GUI(GUIBase):
         }
         
     @torch.no_grad
-    def video_step(self, viewpoint_cams, index):
+    def video_step(self, viewpoint_cams, index, abc=None):
         # Sample the background image
-        texture = self.scene.ibl[index % len(self.scene.ibl)].cuda()
-        # Rendering pass
-        _, relit, _ = render_extended(
+        texture = self.scene.ibl[viewpoint_cams.time].cuda()
+        # Rendering pass render, canon, alpha, info
+        render, _, alpha, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
@@ -279,9 +279,14 @@ class GUI(GUIBase):
             mip_level=self.opt.mip_level
         )
         
-        # Process data
-        relit = relit.squeeze(0)
-        vutils.save_image(relit, os.path.join(self.save_videos, f"{index:05}.jpg"))
+        render = render.squeeze(0)
+        
+        if abc is not None:
+            alpha = alpha.squeeze(-1).squeeze(0)
+            ibl = render_IBL_source(viewpoint_cams, abc.abc, texture)
+            render =  render * (alpha) + (1. - alpha) * ibl
+        
+        vutils.save_image(render, os.path.join(self.save_videos, f"{index:05}.jpg"))
         
     @torch.no_grad
     def video_custom_step(self, viewpoint_cams, texture, index):
