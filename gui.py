@@ -90,16 +90,28 @@ class GUI(GUIBase):
         bg_color = [1, 1, 1] if self.dataset.white_background else [0, 0, 0]
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
-        
         self.cpuloader = True
-        # Set the gaussian mdel and scene
-        gaussians = GaussianModel(dataset.sh_degree, hyperparams)
-        if ckpt_start is not None:
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, load_iteration=ckpt_start, preload_imgs=not self.cpuloader, additional_dataset_args=additional_dataset_args)
-        else:
 
-            
-            scene = Scene(dataset, gaussians, self.opt, args.cam_config, preload_imgs=not self.cpuloader, additional_dataset_args=additional_dataset_args)
+        self.N_test_frames = args.test_frames
+        
+        gaussians = GaussianModel(dataset.sh_degree, hyperparams)
+        if ckpt_start is not None: # Loading checkpoint (for viewing)
+            scene = Scene(
+                dataset, gaussians, 
+                opt=self.opt,
+                N_test_frames=args.test_frames,
+                load_iteration=ckpt_start, 
+                preload_imgs=not self.cpuloader, 
+                additional_dataset_args=additional_dataset_args
+            )
+        else: # Initialization
+            scene = Scene(
+                dataset, gaussians, 
+                opt=self.opt,
+                N_test_frames=args.test_frames,
+                preload_imgs=not self.cpuloader, 
+                additional_dataset_args=additional_dataset_args
+            )
         
         # Initialize DPG      
         super().__init__(use_gui, scene, gaussians, self.expname, view_test)
@@ -351,6 +363,8 @@ if __name__ == "__main__":
     parser.add_argument("--downsample", type=int, default=1)
     
     parser.add_argument("--subset", type=int, default=1)
+    parser.add_argument("--test-frames", type=int, default=10)
+    
     
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
@@ -359,13 +373,10 @@ if __name__ == "__main__":
         from utils.params_utils import merge_hparams
         config = mmcv.Config.fromfile(args.configs)
         args = merge_hparams(args, config)
-    print("Optimizing " + args.model_path)
-
-    # Initialize system state (RNG)
     safe_state(args.quiet)
-        
     
     torch.autograd.set_detect_anomaly(True)
+    print("Experiment: " + args.expname)
     hyp = hp.extract(args)
     initial_name = args.expname     
     name = f'{initial_name}'

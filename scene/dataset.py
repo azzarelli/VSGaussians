@@ -12,11 +12,10 @@ class FourDGSdataset(Dataset):
     ):
         self.dataset = dataset
         self.subset_idxs = None #[len(dataset)]
-        if dataset_name in ['nerfstudio', 'scene2', 'scene3']:
-            if dataset_type == 'test':
-                self.dataset = dataset[0] + dataset[1] + dataset[2]
-                self.subset_idxs = [len(dataset[0]), len(dataset[1]), len(dataset[2])] # Also the starting index of the following dataset-subset
-            
+        if dataset_name == "vsr" and dataset_type == 'test':
+            self.dataset = dataset[0] + dataset[1] + dataset[2]
+            self.subset_idxs = [len(dataset[0]), len(dataset[1]), len(dataset[2])] # Also the starting index of the following dataset-subset
+        
         self.dataset_type = dataset_type
         
         self.loading_flags = {

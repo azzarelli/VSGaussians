@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, num_cams='4', load_iteration=None, max_frames=50, preload_imgs=False, additional_dataset_args=1):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, N_test_frames=10, load_iteration=None, preload_imgs=False, additional_dataset_args=1):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -36,22 +36,15 @@ class Scene:
             print("Loading trained model at iteration {}".format(self.loaded_iter))
 
         
-        if "scene2" in args.source_path:
+        if "studio_test5" in args.source_path:
             max_frames = 33
             num_cams = 19
-            dataset_type="scene2"
+            dataset_type="vsr"
             scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
-        elif "scene3" in args.source_path:
-            max_frames = 33
-            num_cams = 19
-            dataset_type="scene3"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
-        
+
         else:
-            max_frames = 100
-            num_cams = 19
-            dataset_type="nerfstudio"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args)
+            print("Invalid dataset provides. Exiting...")
+            exit()
         
         self.maxframes = max_frames
         self.num_cams = num_cams

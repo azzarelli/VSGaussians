@@ -72,7 +72,7 @@ class GUIBase:
         self.mous_loc_last = [0, 0] # x,y
 
         # Viewer settings for camera/view selection
-        self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % 10 == 0] 
+        self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % self.N_test_frames == 0] 
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         self.play_custom_video = False
