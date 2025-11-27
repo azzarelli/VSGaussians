@@ -40,7 +40,7 @@ class Scene:
             max_frames = 33
             num_cams = 19
             dataset_type="vsr"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs, additional_dataset_args=additional_dataset_args, cam_config=cam_config)
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs,N_test_frames=N_test_frames, additional_dataset_args=additional_dataset_args, cam_config=cam_config)
 
         else:
             print("Invalid dataset provides. Exiting...")

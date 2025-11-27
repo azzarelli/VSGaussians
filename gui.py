@@ -94,7 +94,7 @@ class GUI(GUIBase):
         self.cpuloader = True
 
         self.N_test_frames = args.test_frames
-        
+
         gaussians = GaussianModel(dataset.sh_degree, hyperparams)
         if ckpt_start is not None: # Loading checkpoint (for viewing)
             scene = Scene(
