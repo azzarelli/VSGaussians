@@ -166,31 +166,30 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
             ))
 
         for id, cam in enumerate(cam_infos):
-            if id < N:
-                T = cam.T
-                R = cam.R
+            T = cam.T
+            R = cam.R
 
-                # --- Camera center ---
-                fig.add_trace(go.Scatter3d(
-                    x=[T[0]], y=[T[1]], z=[T[2]],
-                    mode='markers+text',
-                    marker=dict(size=4, color='black'),
-                    text=[str(id)],
-                    textposition='top center',
-                    name=f'cam {id}',
-                    showlegend=False
-                ))
+            # --- Camera center ---
+            fig.add_trace(go.Scatter3d(
+                x=[T[0]], y=[T[1]], z=[T[2]],
+                mode='markers+text',
+                marker=dict(size=4, color='black'),
+                text=[str(id)],
+                textposition='top center',
+                name=f'cam {id}',
+                showlegend=False
+            ))
 
-                # Axes
-                x_axis = R[:, 0] * axis_len
-                y_axis = R[:, 1] * axis_len
-                z_axis = R[:, 2] * axis_len
-                forward = -R[:, 2] * 0.2
+            # Axes
+            x_axis = R[:, 0] * axis_len
+            y_axis = R[:, 1] * axis_len
+            z_axis = R[:, 2] * axis_len
+            forward = -R[:, 2] * 0.2
 
-                add_arrow(fig, T, x_axis, "red")
-                add_arrow(fig, T, y_axis, "green")
-                add_arrow(fig, T, z_axis, "blue")
-                add_arrow(fig, T, forward, "cyan")
+            add_arrow(fig, T, x_axis, "red")
+            add_arrow(fig, T, y_axis, "green")
+            add_arrow(fig, T, z_axis, "blue")
+            add_arrow(fig, T, forward, "cyan")
 
         # Layout
         fig.update_layout(
@@ -220,7 +219,7 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
 
     # Get the colmap id for the first relit camera (i.e. the last 19 frames of the nerfstudio dataset)
     N = len(canon_cams) - M
-    
+
     image=None
     canon=None
     mask=None
@@ -235,17 +234,18 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
     elif subset == 3:
         min_b_id = 66
         max_b_id = 99
-
+        
     relit_cams = []
     background_im_paths_ = []
+    store_bck = True
     for cam in canon_cams:
         if cam.uid > N:
             cam_id = cam.uid - N
             cam_name = f'cam{cam_id:02}'
-            
+
             for background_id, b_path in enumerate(background_im_paths):
                 if background_id >= min_b_id and background_id < max_b_id:
-                    if cam_id == 1: # store only relevant background paths
+                    if store_bck == True: # store only relevant background paths
                         background_im_paths_.append(b_path)
                     
                     im_name = b_path.split('/')[-1].replace('png', 'jpg') # e.g. '000.jpg'
@@ -298,7 +298,7 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
                         time = time,
                     )
                     relit_cams.append(cam_info)
-
+            store_bck = False
     return relit_cams, background_im_paths_
 
 def generate_circular_cams(
@@ -371,28 +371,48 @@ def generate_circular_cams(
     return cams
 
 
-def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_frames=10):
+def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_frames=10, cam_config=1):
     """Construct dataset from nerfstudio
     """
     print(f"Reading {path.split('/')[-1]} & subset {additional_dataset_args} ...")
-    assert additional_dataset_args in [1,2,3], f"--subset needs to be [1,2,3]"
+    assert additional_dataset_args in [1,2,3, -1, -2], f"--subset needs to be [1,2,3]"
     assert N_test_frames >-1, f"--test-frames needs to be > -1"
     
     # Read camera transforms    
     canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
-
+    
+    if path.split('/')[-1] == 'scene3' and cam_config in [6, 12]:
+        if cam_config == 6:
+            target_infos = [2,3,6,11,12,17,18]
+            V_cam = 6
+        elif cam_config == 12:
+            target_infos = [6,7,8,9,10,11,12,13,14,15,16,17,18]
+            V_cam = 12
+            
+        new_cam_infos = []
+        for idx, cam in enumerate(canon_cam_infos):
+            if idx in target_infos:
+                new_cam_infos.append(cam)
+                
+        canon_cam_infos = new_cam_infos
+        M = len(target_infos)
+        
+    else:
+        if 'scene1' in path:
+            V_cam = 5
+        else:
+            V_cam = 18
+            
+        M = 19
     # This should return 18x33=627 CameraInfo classes
-    cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
+    cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, M=M, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
     
     L = len(background_paths)
     assert N_test_frames < L, f"--test-frames needs to be < {L} (the # of background textures)"
     print(f" - using 0-{N_test_frames} for testing leaving {L- N_test_frames} for training")
 
     # split into training and test dataset
-    if 'scene1' in path:
-        V_cam = 5
-    else:
-        V_cam = 18
+    
     print(f" - using camera {V_cam} for testing novel view synthesis")
     
     # Split Test data into varios parts
