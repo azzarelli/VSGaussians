@@ -45,7 +45,8 @@ class GUI(GUIBase):
                  expname,
                  view_test,
                  use_gui:bool=False,
-                 additional_dataset_args=1
+                 additional_dataset_args=1,
+                 cam_config=1
                  ):
         self.stage = 'fine'
         expname = 'output/'+expname
@@ -102,7 +103,8 @@ class GUI(GUIBase):
                 N_test_frames=args.test_frames,
                 load_iteration=ckpt_start, 
                 preload_imgs=not self.cpuloader, 
-                additional_dataset_args=additional_dataset_args
+                additional_dataset_args=additional_dataset_args,
+                cam_config=cam_config
             )
         else: # Initialization
             scene = Scene(
@@ -110,7 +112,8 @@ class GUI(GUIBase):
                 opt=self.opt,
                 N_test_frames=args.test_frames,
                 preload_imgs=not self.cpuloader, 
-                additional_dataset_args=additional_dataset_args
+                additional_dataset_args=additional_dataset_args,
+                cam_config=cam_config
             )
         
         # Initialize DPG      
@@ -363,6 +366,7 @@ if __name__ == "__main__":
     parser.add_argument("--downsample", type=int, default=1)
     
     parser.add_argument("--subset", type=int, default=1)
+    parser.add_argument("--numcams", type=int, default=1)
     parser.add_argument("--test-frames", type=int, default=10)
     
     
@@ -395,7 +399,8 @@ if __name__ == "__main__":
         view_test=args.view_test,
 
         use_gui=False if dpg is None else True,
-        additional_dataset_args=args.subset
+        additional_dataset_args=args.subset,
+        cam_config=args.numcams
     )
     gui.render()
     del gui
