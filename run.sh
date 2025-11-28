@@ -26,5 +26,5 @@ else
     --configs arguments/baseline.py \
     --test_iterations 2000 \
     --subset $3 \
-    --no-canon-loss
+    --train-single-frame 22
 fi

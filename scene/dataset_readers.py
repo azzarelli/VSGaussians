@@ -416,20 +416,24 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
             
         M = 19
         
-    
     # This should return 18x33=627 CameraInfo classes
     cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, M=M, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
     
     L = len(background_paths)
-    assert N_test_frames < L, f"--test-frames needs to be < {L} (the # of background textures)"
-    print(f" - using 0-{N_test_frames} for testing leaving {L- N_test_frames} for training")
+    
+    if canon_args["single_frame"] != -1:
+        print(f"- overriding training for a single frame for {canon_args['single_frame']}")
+        assert canon_args["single_frame"] > -1 and canon_args["single_frame"] < L, f"--train-single-frame input need to be between 0 and {L}"
+        N_test_frames = L-1
+        L_test_idx_set = [i for i in range(L) if i != canon_args["single_frame"]] # The lighting-only test set (the first 10 frames for each camera)
 
-    # split into training and test dataset
+    else:
+        assert N_test_frames < L, f"--test-frames needs to be < {L} (the # of background textures)"
+        print(f" - using 0-{N_test_frames} for testing leaving {L- N_test_frames} for training")
+        print(f" - using camera {V_cam} for testing novel view synthesis")
     
-    print(f" - using camera {V_cam} for testing novel view synthesis")
-    
-    # Split Test data into varios parts
-    L_test_idx_set = [i for i in range(N_test_frames)] # The lighting-only test set (the first 10 frames for each camera)
+        L_test_idx_set = [i for i in range(N_test_frames)] # The lighting-only test set (the first 10 frames for each camera)
+        
     V_test_idx_set = [(V_cam*L)+i for i in range(L) if i not in L_test_idx_set] # The novel-view only test set
     LV_test_idx_set = [(V_cam*L)+i for i in range(L) if i in L_test_idx_set] # The novel-view & novel lighting test set
 

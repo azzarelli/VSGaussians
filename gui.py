@@ -385,6 +385,8 @@ if __name__ == "__main__":
     parser.add_argument("--subset", type=int, default=1)
     parser.add_argument("--numcams", type=int, default=1)
     parser.add_argument("--test-frames", type=int, default=10)
+    parser.add_argument("--train-single-frame", type=int, default=-1)
+
     
     parser.add_argument('--lit-canon-loss', action='store_true', default=False)
     parser.add_argument('--no-canon-loss', action='store_true', default=False)
@@ -407,7 +409,8 @@ if __name__ == "__main__":
     
     canon_args = {
         "canon_data":"lit" if args.lit_canon_loss else "unlit",
-        "no_canon_loss":args.no_canon_loss 
+        "no_canon_loss":args.no_canon_loss,
+        "single_frame":args.train_single_frame
     }
     
     gui = GUI(
