@@ -37,6 +37,9 @@ class CameraInfo(NamedTuple):
     width: int
     height: int
     time : int
+    
+    def update_canon(self, path):
+        return self._replace(canon_path=path)
    
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -371,8 +374,16 @@ def generate_circular_cams(
     return cams
 
 
-def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_frames=10, cam_config=1):
+def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_frames=10, cam_config=1, canon_args=None):
     """Construct dataset from nerfstudio
+    
+    Args:
+        path: str, path to dataself folder (containnig images/meta/transforms.json/splat)
+        preload_imgs: bool, to load images to gpu before training (default: false)
+        additional_dataset_args: int, The scene configuration to use (1-3 for Scenes 1-3) (main results in paper)
+        N_test_frames: int, number of IBL sources to use for testing. The remaining IBL backgrounds are used for training (anlations in paper)
+        can_config: int, if in [6,12] choose the 6-camera or 12-camera scene configurations (ablations in paper)
+        canon_args: dict, {"canon_data": "lit" if we use a lit reference as canon or "unlit" for unlit reference, ...}
     """
     print(f"Reading {path.split('/')[-1]} & subset {additional_dataset_args} ...")
     assert additional_dataset_args in [1,2,3, -1, -2], f"--subset needs to be [1,2,3]"
@@ -404,6 +415,8 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
             V_cam = 18
             
         M = 19
+        
+    
     # This should return 18x33=627 CameraInfo classes
     cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, M=M, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
     
@@ -426,7 +439,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
     LV_test_cams = [cam for idx, cam in enumerate(cam_infos) if idx in LV_test_idx_set] # For indexs in the novel view and novel lighting test set
     test_cams = [L_test_cams, V_test_cams, LV_test_cams]
 
-    # We should have 18x23=414 training images for the scene
+    # We should have 18x23=414 training images for the scene for the vanilla tests
     relighting_cams = [cam for idx, cam in enumerate(cam_infos) if (idx % L) not in L_test_idx_set and idx not in V_test_idx_set] # For indexs not in lighting and novel view cameras
 
     # Select cameras with a common background for pose estimation (from the training set)
@@ -437,6 +450,25 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
     if video_cams is None: # TODO: Add script for video paths for this scene
         print("No video cams defaulting to View only test data")
         video_cams = test_cams[1]
+        
+        
+    # If we want to train from a lit reference:
+    print(f"Using {canon_args['canon_data']} images for training canon")
+    if canon_args["canon_data"] == "lit" and preload_imgs == False:
+        # `relighting_cams` order w.r.t (j,k): [(0,0), (0,1), ..., (0, K), (1,0), ..., (J,K)]
+        K = L- N_test_frames
+        J = M-1
+        assert J*K == len(relighting_cams), f"the predicted J={J} x K={K} != {len(relighting_cams)} number of relighting cams in list"
+
+        new_relighting_set = []
+        for j in range(J):
+            new_canon_fp = relighting_cams[j*K].image_path
+            for k in range(1, K): # skip the first one
+                relighting_cams[j*K+k] = relighting_cams[j*K+k].update_canon(new_canon_fp)
+                new_relighting_set.append(relighting_cams[j*K+k])
+
+        relighting_cams = new_relighting_set
+        print(f"... now using {J*(K-1)} trainging images and using k=0 for canonical training")    
         
     nerf_normalization = getNerfppNorm(relighting_cams)
 

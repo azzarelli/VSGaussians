@@ -19,7 +19,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, N_test_frames=10, load_iteration=None, preload_imgs=False, additional_dataset_args=1, cam_config=1):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, opt=None, N_test_frames=10, load_iteration=None, preload_imgs=False, additional_dataset_args=1, cam_config=1, canon_args=None):
         """
         :param path: Path to colmap scene main folder.
         """
@@ -40,7 +40,7 @@ class Scene:
             max_frames = 33 - N_test_frames
             num_cams = 19
             dataset_type="vsr"
-            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs,N_test_frames=N_test_frames, additional_dataset_args=additional_dataset_args, cam_config=cam_config)
+            scene_info = sceneLoadTypeCallbacks[dataset_type](args.source_path, preload_imgs=preload_imgs,N_test_frames=N_test_frames, additional_dataset_args=additional_dataset_args, cam_config=cam_config, canon_args=canon_args)
 
         else:
             print("Invalid dataset provides. Exiting...")

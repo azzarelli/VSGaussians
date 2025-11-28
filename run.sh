@@ -26,6 +26,5 @@ else
     --configs arguments/baseline.py \
     --test_iterations 2000 \
     --subset $3 \
-    --numcams -1 \
-    --test-frames 23
+    --lit-canon-loss
 fi

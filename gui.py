@@ -46,7 +46,8 @@ class GUI(GUIBase):
                  view_test,
                  use_gui:bool=False,
                  additional_dataset_args=1,
-                 cam_config=1
+                 cam_config=1,
+                 canon_args=None
                  ):
         self.stage = 'fine'
         expname = 'output/'+expname
@@ -55,6 +56,7 @@ class GUI(GUIBase):
         self.pipe = pipe
         self.dataset = dataset
         self.dataset.model_path = expname
+        self.canon_args=canon_args
         
         # Metrics, Test images and Video Renders folders
         self.statistics_path = os.path.join(expname, 'statistics')
@@ -104,7 +106,8 @@ class GUI(GUIBase):
                 load_iteration=ckpt_start, 
                 preload_imgs=not self.cpuloader, 
                 additional_dataset_args=additional_dataset_args,
-                cam_config=cam_config
+                cam_config=cam_config,
+                canon_args=canon_args
             )
         else: # Initialization
             scene = Scene(
@@ -113,7 +116,8 @@ class GUI(GUIBase):
                 N_test_frames=args.test_frames,
                 preload_imgs=not self.cpuloader, 
                 additional_dataset_args=additional_dataset_args,
-                cam_config=cam_config
+                cam_config=cam_config,
+                canon_args=canon_args
             )
         
         # Initialize DPG      
@@ -369,6 +373,9 @@ if __name__ == "__main__":
     parser.add_argument("--numcams", type=int, default=1)
     parser.add_argument("--test-frames", type=int, default=10)
     
+    parser.add_argument('--lit-canon-loss', action='store_true', default=False)
+    parser.add_argument('--no-canon-loss', action='store_true', default=False)
+
     
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
@@ -385,6 +392,11 @@ if __name__ == "__main__":
     initial_name = args.expname     
     name = f'{initial_name}'
     
+    canon_args = {
+        "canon_data":"lit" if args.lit_canon_loss else "unlit",
+        "no_canon_loss":args.no_canon_loss 
+    }
+    
     gui = GUI(
         args=args, 
         hyperparams=hyp, 
@@ -400,7 +412,8 @@ if __name__ == "__main__":
 
         use_gui=False if dpg is None else True,
         additional_dataset_args=args.subset,
-        cam_config=args.numcams
+        cam_config=args.numcams,
+        canon_args=canon_args
     )
     gui.render()
     del gui
