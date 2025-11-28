@@ -26,5 +26,5 @@ else
     --configs arguments/baseline.py \
     --test_iterations 2000 \
     --subset $3 \
-    --lit-canon-loss
+    --no-canon-loss
 fi

@@ -293,9 +293,9 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1)
     else:
 
-        render, meta = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
+        render, _, alpha, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
         render = render.squeeze(0)
-        alpha = meta[1].squeeze(-1).squeeze(0)
+        alpha = alpha.squeeze(-1).squeeze(0)
         if abc is not None:
             # t1 = time.time()
             ibl = render_IBL_source(viewpoint_camera, abc, texture)
@@ -312,7 +312,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         "extras":extras # A dict containing mor point info
         }
 
-def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2):
+def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2, cli_use_canon=True):
     """Fine/Deformation function
     Notes:
         Trains/Renders the deformed gaussians
@@ -366,7 +366,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     )
 
     colors_deform = colors_deform.squeeze(1).permute(0, 3, 1, 2)
-    # t4 = time.time()
+    alpha = alpha.squeeze(1).permute(0, 3, 1, 2)
     # print(f"G-call {1./(t2-t1):.4f} MipSamp{1./(t3-t2):.4f} Rend {1./(t4-t3):.4f}")
     
     if return_canon:
@@ -383,10 +383,9 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         )
 
         colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-        alpha = alpha.squeeze(1).permute(0, 3, 1, 2)
 
         return colors_deform, colors_canon, alpha, meta
-    return colors_deform, (meta, alpha)
+    return colors_deform, None, alpha, meta #(meta, alpha)
 
 
 def render_canonical(viewpoint_camera, pc):

@@ -58,6 +58,9 @@ class GUI(GUIBase):
         self.dataset.model_path = expname
         self.canon_args=canon_args
         
+        if canon_args["no_canon_loss"]:
+            print("Not training canonical scene...")
+        
         # Metrics, Test images and Video Renders folders
         self.statistics_path = os.path.join(expname, 'statistics')
         self.save_tests = os.path.join(expname, 'tests')
@@ -202,8 +205,8 @@ class GUI(GUIBase):
             viewpoint_cams, 
             self.gaussians,
             textures,
-            return_canon=True,
-            mip_level=self.opt.mip_level
+            return_canon= not self.canon_args["no_canon_loss"],
+            mip_level=self.opt.mip_level,
         )
 
         self.gaussians.pre_backward(self.iteration, info)
@@ -211,14 +214,20 @@ class GUI(GUIBase):
         # Fetch and load training data
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-        canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         gt_out = render_gt* masked_gt
-        canon_out = canons_gt* masked_gt
         
+        
+        # CLI input for not training canonical scene (default: true)
+        if self.canon_args["no_canon_loss"]:
+            canon_loss = 0.
+        else:
+            canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
+            canon_out = canons_gt* masked_gt
+            canon_loss = l1_loss(canon, canon_out)
 
-        # Loss Functions
+
+        # Other loss Functions
         deform_loss = l1_loss(render, gt_out)
-        canon_loss = l1_loss(canon, canon_out)
         dssim = (1-ssim(render, gt_out))/2.
         
         depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
@@ -230,7 +239,11 @@ class GUI(GUIBase):
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                if self.canon_args["no_canon_loss"]:
+                    dpg.set_value("_log_canon", f"ssim {dssim.item():.5f}")
+                else:
+                    dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                   
                 # dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
@@ -252,7 +265,7 @@ class GUI(GUIBase):
         id1 = viewpoint_cams.time
         texture = self.scene.ibl[id1].cuda()
         # Rendering pass
-        relit, _ = render_extended(
+        relit, _, _, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
@@ -312,7 +325,7 @@ class GUI(GUIBase):
         # Sample the background image
         texture = texture.cuda()
         # Rendering pass
-        _, relit, _ = render_extended(
+        relit, _, _, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
