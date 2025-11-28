@@ -9,7 +9,14 @@ This has been tested on NVidia RTX 3090 w/ py3.10 pt2.4 and cu11.8, and NVidia R
 4. Run `pip install -r requirements.txt`
 5. (Optional) Cry because that probably didn't work and the guy who created this repo also has no clue, so you choose not to start an issue because there's no way he's resolving it 
 
+## Texture Stats
 
+For `texture_statistic.py` install
+```
+python3 -m venv texenv
+source texenv/bin/activate
+pip install numpy scikit-image matplotlib opencv-python
+```
 
 # Models/Git Branches
 
