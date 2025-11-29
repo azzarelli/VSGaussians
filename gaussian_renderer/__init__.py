@@ -368,9 +368,8 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     final_colors = torch.cat(final_colors, dim=0)
     
     if return_canon:
-
-        return colors_deform, color_base, alpha, meta
-    return colors_deform, (meta, alpha)
+        return final_colors, color_base, alpha, meta
+    return final_colors, (meta, alpha)
 
 
 def render_canonical(viewpoint_camera, pc):
@@ -423,7 +422,6 @@ def sample_texture(I, uv):
     uv = 2.*uv -1.
     uv = uv.permute(1,2,0).unsqueeze(0) # for grid_sample input we need, N,Hout,Wout,2, where N =1, and W=number of points
     
-    print(uv.shape)
     # Scaling mip-maps
     mip_samples = F.grid_sample(I.unsqueeze(0), uv, mode='bilinear', align_corners=False).squeeze(0)
     return mip_samples

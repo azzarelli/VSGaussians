@@ -305,7 +305,7 @@ class GUI(GUIBase):
         # Sample the background image
         texture = texture.cuda()
         # Rendering pass
-        _, relit, _ = render_extended(
+        relit, _, _, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
