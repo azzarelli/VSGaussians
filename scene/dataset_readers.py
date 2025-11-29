@@ -457,7 +457,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
         
         
     # If we want to train from a lit reference:
-    print(f"Using {canon_args['canon_data']} images for training canon")
+    print(f"- using {canon_args['canon_data']} images for training canon")
     if canon_args["canon_data"] == "lit" and preload_imgs == False:
         # `relighting_cams` order w.r.t (j,k): [(0,0), (0,1), ..., (0, K), (1,0), ..., (J,K)]
         K = L- N_test_frames
