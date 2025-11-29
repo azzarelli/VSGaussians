@@ -18,6 +18,7 @@ if [ "$4" == "view" ]; then
   CUDA_LAUNCH_BLOCKING=1 python gui.py -s "$BASEDIR/$SAVEDIR/" \
     --expname "$SAVEDIR/$EXP_NAME" \
     --configs arguments/baseline.py \
+    --subset $3 
     --start_checkpoint "$5" --view-test
 else
   echo "Training starting..."
