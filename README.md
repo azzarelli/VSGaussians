@@ -16,6 +16,7 @@ For `texture_statistic.py` install
 python3 -m venv texenv
 source texenv/bin/activate
 pip install numpy scikit-image matplotlib opencv-python
+pip install joblib
 ```
 
 # Models/Git Branches
