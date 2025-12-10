@@ -237,6 +237,9 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
     elif subset == 3:
         min_b_id = 66
         max_b_id = 99
+    elif subset == -1:
+        min_b_id = 0
+        max_b_id = 99
         
     relit_cams = []
     background_im_paths_ = []
@@ -321,7 +324,7 @@ def generate_circular_cams(
         with open(fp, "r") as json_file:
             contents = json.load(json_file)
 
-        zoomscale = 0.65
+        zoomscale = 1.
         # --- recompute fx, fy from that new FOV
         fx_new = cam.fx*zoomscale
         fy_new = cam.fy*zoomscale
@@ -386,7 +389,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
         canon_args: dict, {"canon_data": "lit" if we use a lit reference as canon or "unlit" for unlit reference, ...}
     """
     print(f"Reading {path.split('/')[-1]} & subset {additional_dataset_args} ...")
-    assert additional_dataset_args in [1,2,3, -1, -2], f"--subset needs to be [1,2,3]"
+    assert additional_dataset_args in [1,2,3, -1, -2], f"--subset needs to be [1,2,3, -1]"
     assert N_test_frames >-1, f"--test-frames needs to be > -1"
     
     # Read camera transforms    
@@ -410,7 +413,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
         
     else:
         if 'scene1' in path:
-            V_cam = 5
+            V_cam = 4
         else:
             V_cam = 18
             

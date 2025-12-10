@@ -27,5 +27,5 @@ else
     --configs arguments/baseline.py \
     --test_iterations 2000 \
     --subset $3 \
-    --train-single-frame 22
+    --test-frames 1
 fi

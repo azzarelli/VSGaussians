@@ -213,7 +213,7 @@ class GUIBase:
                     self.initialize_abc()
                     cnt = 1
                     
-                    # view_size=len(self.scene.video_camera)
+                    view_size=len(self.scene.video_camera)
                     # for i, test_cam in enumerate(self.scene.video_camera):
                     #     metric_results = self.video_step(test_cam, i, abc=self.abc)
                     #     dpg.render_dearpygui_frame()
@@ -406,11 +406,16 @@ class GUIBase:
 
         t1 = time.time()
         buffer_image = self.buffer_image
-
         if self.save_frame:
             frame_uint8 = (buffer_image * 255).astype("uint8")
             frame_bgr = cv2.cvtColor(frame_uint8, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("current_frame.png", frame_bgr)
+            print(self.finecoarse_flag)
+            if self.finecoarse_flag:
+                cv2.imwrite(f"{self.current_cam_index}_{self.time % len(self.scene.ibl)}_{self.vis_mode}.png", frame_bgr)
+
+            else: 
+                cv2.imwrite(f"{self.current_cam_index}_{self.time % len(self.scene.ibl)}_lighting_prediction.png", frame_bgr)
+                
             self.save_frame = False
 
         dpg.set_value(
