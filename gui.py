@@ -25,6 +25,29 @@ from utils.image_utils import psnr, mse, rgb_to_ycbcr
 from gaussian_renderer import render_extended, render_IBL_source
 
 
+def edge_aware_weight(image, eps=1e-6):
+    """
+    image: (B, 3, H, W), requires_grad may be True
+    returns: scalar = sum over batch(Wx + Wy) with gradients
+    """
+
+    B = image.size(0)
+    total = 0.0
+
+    for i in range(B):
+        img = image[i:i+1]  # keep dims, preserves grad flow
+
+        # Luminance
+        L = 0.2989 * img[:,0] + 0.5870 * img[:,1] + 0.1140 * img[:,2]  # (1,H,W)
+
+        # Finite differences (keep grad)
+        dx = (L[..., :, 1:] - L[..., :, :-1]).abs()
+        dy = (L[..., 1:, :] - L[..., :-1, :]).abs()
+
+        # Sum for this image
+        total = total + (dx.mean() + dy.mean())/2.
+
+    return total
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
@@ -201,7 +224,7 @@ class GUI(GUIBase):
             id1 = cam.time
             textures.append(self.scene.ibl[id1])
         
-        render, canon, alpha, info = render_extended(
+        render, canon, norms, alpha, info = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
@@ -215,6 +238,7 @@ class GUI(GUIBase):
         render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
         gt_out = render_gt* masked_gt
+        
         
         
         # CLI input for not training canonical scene (default: true)
@@ -231,9 +255,10 @@ class GUI(GUIBase):
         dssim = (1-ssim(render, gt_out))/2.
         
         depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
-        # depth_loss = 0.
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + 0.2*depth_loss
-                   
+        
+        norm_loss = edge_aware_weight(norms)
+
+        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + 0.2*depth_loss + 0.2*norm_loss
         with torch.no_grad():
             if self.gui:
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
@@ -303,7 +328,7 @@ class GUI(GUIBase):
         # Sample the background image
         texture = self.scene.ibl[viewpoint_cams.time].cuda()
         # Rendering pass render, canon, alpha, info
-        render, _, alpha, _ = render_extended(
+        render, _, _, alpha, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],
@@ -325,7 +350,7 @@ class GUI(GUIBase):
         # Sample the background image
         texture = texture.cuda()
         # Rendering pass
-        relit, _, _, _ = render_extended(
+        relit, _, _,_, _ = render_extended(
             [viewpoint_cams], 
             self.gaussians,
             [texture],

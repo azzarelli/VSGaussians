@@ -28,6 +28,47 @@ def process_full_Gaussians(pc):
         
     return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
 
+def gaussian_normals(quat, scales, sharpness=50):
+    """
+    Differentiable normals for Gaussian ellipsoids.
+
+    The normal is a smooth approximation of the axis corresponding
+    to the smallest scale (physical surface normal).
+
+    Args:
+        quat:   (N, 4) quaternion (w, x, y, z)
+        scales: (N, 3) Gaussian scales
+        sharpness: controls hardness of min (higher = closer to argmin)
+
+    Returns:
+        normals: (N, 3) differentiable unit normals
+    """
+
+    # --- Normalize quaternion ---
+    quat = quat / quat.norm(dim=1, keepdim=True)
+
+    w, x, y, z = quat.unbind(dim=1)
+
+    # --- Rotation matrix from quaternion ---
+    R = torch.stack([
+        torch.stack([1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)], dim=1),
+        torch.stack([2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)], dim=1),
+        torch.stack([2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)], dim=1)
+    ], dim=1)  # (N, 3, 3)
+
+    # --- Soft selection of smallest-axis normal ---
+    # softmin across scales: exp(-scale * sharpness)
+    weights = torch.softmax(-scales * sharpness, dim=1)   # (N, 3)
+
+    # Weighted combination of rotated axes
+    # R[:, :, 0] = axis_x, R[:, :, 1] = axis_y, R[:, :, 2] = axis_z
+    normals = (R * weights.unsqueeze(1)).sum(dim=2)        # (N, 3)
+
+    # --- Normalize ---
+    normals = normals / normals.norm(dim=1, keepdim=True)
+
+    return normals
+
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
         gmode = 'RGB+D'
@@ -223,7 +264,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         elif view_args['vis_mode'] == 'alpha':
             mode = "RGB"
         elif view_args['vis_mode'] == 'normals':
-            mode = "normals"
+            colors = gaussian_normals(rotation, scales)
         elif view_args['vis_mode'] == '2D':
             mode = "2D"
         elif view_args['vis_mode'] == 'D':
@@ -241,12 +282,11 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             mean_min = means3D.min()
             colors = (means3D - mean_min) / (mean_max - mean_min)
             colors = means3D.unsqueeze(0)
-            
         elif view_args['vis_mode'] == 'deform':
             colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
         
         # Change for rendering with rgb instead of shs
-        if view_args['vis_mode'] in ["deform", "xyz"]:
+        if view_args['vis_mode'] in ["deform", "xyz", "normals"]:
             mode = "RGB"
             active_sh=None
             
@@ -383,8 +423,23 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         )
 
         colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-
-        return colors_deform, colors_canon, alpha, meta
+        
+        normals_finals = gaussian_normals(rotation, scales).unsqueeze(0).repeat(M, 1, 1)
+        normals_rend, _, _ = rendering_pass(
+            means3D_final,
+            rotation_final, 
+            scales_final, 
+            opacity_final, 
+            normals_finals,
+            None, 
+            viewpoint_camera, 
+            None,
+            mode="RGB"
+        )
+        
+        normals_rend = normals_rend.squeeze(1).permute(0, 3, 1, 2)
+        
+        return colors_deform, colors_canon, normals_rend, alpha, meta
     return colors_deform, None, alpha, meta #(meta, alpha)
 
 

@@ -740,7 +740,8 @@ class GUIBase:
                     self.vis_mode = 'sigma'
                 def callback_toggle_show_deform(sender):
                     self.vis_mode = 'deform'
-
+                def callback_toggle_show_norms(sender):
+                    self.vis_mode = 'normals'
                 dpg.add_text(" : Appearance Buffers : ")
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)
@@ -752,6 +753,7 @@ class GUIBase:
                 
                 dpg.add_text(" : Geometry Buffers : ")
                 with dpg.group(horizontal=True):
+                    dpg.add_button(label="Norms", callback=callback_toggle_show_norms)
                     dpg.add_button(label="Zc", callback=callback_toggle_show_depth)
                     dpg.add_button(label="E[Zc]", callback=callback_toggle_show_edepth)
                     dpg.add_button(label="Zc", callback=callback_toggle_show_2dgsdepth)
