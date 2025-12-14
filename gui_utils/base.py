@@ -217,6 +217,47 @@ class GUIBase:
                     # for i, test_cam in enumerate(self.scene.video_camera):
                     #     metric_results = self.video_step(test_cam, i, abc=self.abc)
                     #     dpg.render_dearpygui_frame()
+                    
+                    # metrics = {
+                    #     "mse":0.,
+                    #     "psnr":0.,
+                    #     "psnr-y":0.,
+                    #     "psnr-crcb":0.,
+                    #     "ssim":0.
+                    # }
+                    
+                    # datasets = {
+                    #     "L":metrics.copy(),
+                    #     "V":metrics.copy(),
+                    #     "LV":metrics.copy(),
+                    # }
+                    # test_size = len(self.scene.test_camera)
+                    # dataset_idxs = self.scene.test_camera.subset_idxs
+
+                    # for i, test_cam in enumerate(self.scene.test_camera):
+                    #     print(i)
+                    #     if i < dataset_idxs[0]: # L-only tests
+                    #         d_type = "L"
+                    #     elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                    #         d_type = "V"
+                    #     else:
+                    #         d_type = "LV"
+                            
+                    #     metric_results = self.test_step(test_cam, i, d_type)
+                    
+                            
+                    #     for key in metrics.keys():
+                    #         datasets[d_type][key] += metric_results[key].item()
+                        
+                    # # Average
+                    # for key, lengths in zip(datasets.keys(), dataset_idxs):
+                    #     for key_1 in metrics.keys():
+                    #         datasets[key][key_1] /= lengths
+
+                    
+                    # test_fp = os.path.join(self.statistics_path, f"metrics_{self.iteration}.json")
+                    # with open(test_fp, "w") as outfile:
+                    #     json.dump(datasets, outfile, indent=4, ensure_ascii=False)
 
 
                 with torch.no_grad():

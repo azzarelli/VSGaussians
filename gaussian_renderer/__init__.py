@@ -284,6 +284,10 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             colors = means3D.unsqueeze(0)
         elif view_args['vis_mode'] == 'deform':
             colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
+            
+            # For testing sampling outer padding
+            colors = (colors.sum(-1).unsqueeze(-1) < 0.01).repeat(1,1,3).float()
+            
         
         # Change for rendering with rgb instead of shs
         if view_args['vis_mode'] in ["deform", "xyz", "normals"]:
