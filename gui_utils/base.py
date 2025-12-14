@@ -213,10 +213,10 @@ class GUIBase:
                     self.initialize_abc()
                     cnt = 1
                     
-                    view_size=len(self.scene.video_camera)
-                    for i, test_cam in enumerate(self.scene.video_camera):
-                        metric_results = self.video_step(test_cam, i, abc=self.abc)
-                        dpg.render_dearpygui_frame()
+                    # view_size=len(self.scene.video_camera)
+                    # for i, test_cam in enumerate(self.scene.video_camera):
+                    #     metric_results = self.video_step(test_cam, i, abc=self.abc)
+                    #     dpg.render_dearpygui_frame()
 
 
                 with torch.no_grad():

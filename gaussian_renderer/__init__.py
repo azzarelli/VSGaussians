@@ -244,7 +244,8 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             
         elif view_args['vis_mode'] == 'deform':
             colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
-        
+            # colors = (colors.sum(-1).unsqueeze(-1) < 0.01).repeat(1,1,3).float()
+
         # Change for rendering with rgb instead of shs
         if view_args['vis_mode'] in ["deform", "xyz"]:
             mode = "RGB"
@@ -288,6 +289,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
 
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
+
         
         elif view_args['vis_mode'] == 'xyz':
             render = render.squeeze(0).permute(2,0,1)
@@ -457,7 +459,7 @@ def sample_mipmap(I, uv, s, num_levels=3):
     # For each map sample using u,v and store the values in samples
     for idx, map in enumerate(maps):
         # map is (1, 3, h, w)
-        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
+        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False, padding_mode='border').squeeze(2).squeeze(0).permute(1,0)
 
     gather_idx_low  = lower.view(N, 1, 1).expand(-1, 1, 3)
     gather_idx_high = upper.view(N, 1, 1).expand(-1, 1, 3)
