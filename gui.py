@@ -281,9 +281,11 @@ class GUI(GUIBase):
         gt_out = gt_img * mask
 
         # Save image
-        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
-            save_im = mask*relit + (1.-mask)*gt_img
-            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+        # if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
+        
+        save_im = mask*relit + (1.-mask)*gt_img
+        vutils.save_image(gt_img, os.path.join(self.save_tests, f"{index:05}.jpg"))
+        vutils.save_image(mask, os.path.join(self.save_tests, f"mask{index:05}.jpg"))
 
         
         gt_ycc = rgb_to_ycbcr(gt_out).squeeze(0)

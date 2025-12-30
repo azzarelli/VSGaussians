@@ -413,7 +413,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
         
     else:
         if 'scene1' in path:
-            V_cam = 4
+            V_cam = 5
         else:
             V_cam = 18
             

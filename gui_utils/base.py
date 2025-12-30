@@ -214,9 +214,25 @@ class GUIBase:
                     cnt = 1
                     
                     view_size=len(self.scene.video_camera)
-                    # for i, test_cam in enumerate(self.scene.video_camera):
-                    #     metric_results = self.video_step(test_cam, i, abc=self.abc)
-                    #     dpg.render_dearpygui_frame()
+                    # Test Step
+                    if self.iteration % self.test_every == 0:
+
+                        test_size = len(self.scene.test_camera)
+                        dataset_idxs = self.scene.test_camera.subset_idxs
+                        cnt = 0
+                        for i, test_cam in enumerate(self.scene.test_camera):
+                            if dataset_idxs is not None:
+                                if i < dataset_idxs[0]: # L-only tests
+                                    d_type = "L"
+                                elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                                    d_type = "V"
+                                else:
+                                    d_type = "LV"
+                            else:
+                                d_type = "LV"
+                                cnt += 1
+                            metric_results = self.test_step(test_cam, i, d_type)
+                        exit()
 
 
                 with torch.no_grad():

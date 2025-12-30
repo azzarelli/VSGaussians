@@ -457,7 +457,7 @@ def sample_mipmap(I, uv, s, num_levels=3):
     # For each map sample using u,v and store the values in samples
     for idx, map in enumerate(maps):
         # map is (1, 3, h, w)
-        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
+        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', padding_mode='border', align_corners=False).squeeze(2).squeeze(0).permute(1,0)
 
     gather_idx_low  = lower.view(N, 1, 1).expand(-1, 1, 3)
     gather_idx_high = upper.view(N, 1, 1).expand(-1, 1, 3)
