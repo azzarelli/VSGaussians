@@ -119,7 +119,7 @@ class GUIBase:
                         self.iter_start.record()
                         
                         # Depending on stage process a training step
-                        self.train_step(viewpoint_cams)
+                        # self.train_step(viewpoint_cams)
                     
                         self.iter_end.record()
                     
@@ -215,24 +215,24 @@ class GUIBase:
                     
                     view_size=len(self.scene.video_camera)
                     # Test Step
-                    if self.iteration % self.test_every == 0:
+                    # if self.iteration % self.test_every == 0:
 
-                        test_size = len(self.scene.test_camera)
-                        dataset_idxs = self.scene.test_camera.subset_idxs
-                        cnt = 0
-                        for i, test_cam in enumerate(self.scene.test_camera):
-                            if dataset_idxs is not None:
-                                if i < dataset_idxs[0]: # L-only tests
-                                    d_type = "L"
-                                elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
-                                    d_type = "V"
-                                else:
-                                    d_type = "LV"
-                            else:
-                                d_type = "LV"
-                                cnt += 1
-                            metric_results = self.test_step(test_cam, i, d_type)
-                        exit()
+                    #     test_size = len(self.scene.test_camera)
+                    #     dataset_idxs = self.scene.test_camera.subset_idxs
+                    #     cnt = 0
+                    #     for i, test_cam in enumerate(self.scene.test_camera):
+                    #         if dataset_idxs is not None:
+                    #             if i < dataset_idxs[0]: # L-only tests
+                    #                 d_type = "L"
+                    #             elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                    #                 d_type = "V"
+                    #             else:
+                    #                 d_type = "LV"
+                    #         else:
+                    #             d_type = "LV"
+                    #             cnt += 1
+                    #         metric_results = self.test_step(test_cam, i, d_type)
+                    #     exit()
 
 
                 with torch.no_grad():
@@ -400,16 +400,19 @@ class GUIBase:
             mode="bilinear",
             align_corners=False,
         ).squeeze(0)
-        
-        try:
-            if self.show_mask == 'occ':
-                mask = cam.sceneoccluded_mask.squeeze(0).cuda()
-            else:
-                mask = 0.
-            buffer_image[0] += mask*0.5
-        except:
-            pass
-        
+        buffer_image = cam.image.cuda()
+        mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+        buffer_image[0] += mask*0.5
+        # try:
+        #     if self.show_mask == 'occ':
+        #         mask = cam.sceneoccluded_mask.squeeze(0).cuda()
+        #     else:
+        #         mask = 0.
+        #     buffer_image[0] += mask*0.5
+        # except:
+        #     pass
+        # print(cam.image.shape, )
+        # print(cam.image.shape,buffer_image.shape )
         self.buffer_image = (
             buffer_image.permute(1, 2, 0)
             .contiguous()
