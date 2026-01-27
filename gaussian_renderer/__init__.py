@@ -293,7 +293,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1)
     else:
 
-        render, _, alpha, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level)
+        render, _, alpha, _ = render_extended([viewpoint_camera], pc, [texture], mip_level=mip_level, exposure=view_args['exposure'])
         render = render.squeeze(0)
         alpha = alpha.squeeze(-1).squeeze(0)
         if abc is not None:
@@ -312,7 +312,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         "extras":extras # A dict containing mor point info
         }
 
-def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2, cli_use_canon=True):
+def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_level=2, cli_use_canon=True, exposure=None):
     """Fine/Deformation function
     Notes:
         Trains/Renders the deformed gaussians
@@ -338,6 +338,9 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
+        
+        if exposure is not None:
+            tex_invariance = exposure * tex_invariance
         
         colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=mip_level)
         color_d = tex_invariance*colors_ibl

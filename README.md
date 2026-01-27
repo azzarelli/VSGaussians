@@ -7,8 +7,7 @@ This has been tested on NVidia RTX 3090 w/ py3.10 pt2.4 and cu11.8, and NVidia R
 2. Install pytorch (requires compatibility with `gsplat`; I use pt24)
 3. Download `gsplat` either via `pip install gsplat` or with wheel (I used `gsplat-1.5.3+pt24cu124-cp310-cp310-linux_x86_64.whl`)
 4. Run `pip install -r requirements.txt`
-5. (Optional) Cry because that probably didn't work and the guy who created this repo also has no clue, so you choose not to start an issue because there's no way he's resolving it 
-
+5. Use `bash run.sh SRC NAME ARGS` to run the method
 ## Texture Stats
 
 For `texture_statistic.py` install

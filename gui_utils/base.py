@@ -70,6 +70,8 @@ class GUIBase:
         # Analysis/Inspection tools
         self.mous_loc = [0, 0] # x,y
         self.mous_loc_last = [0, 0] # x,y
+        
+        self.exposure = 0.
 
         # Viewer settings for camera/view selection
         self.free_cams = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % self.N_test_frames == 0] 
@@ -215,24 +217,24 @@ class GUIBase:
                     
                     view_size=len(self.scene.video_camera)
                     # Test Step
-                    if self.iteration % self.test_every == 0:
+                    # if self.iteration % self.test_every == 0:
 
-                        test_size = len(self.scene.test_camera)
-                        dataset_idxs = self.scene.test_camera.subset_idxs
-                        cnt = 0
-                        for i, test_cam in enumerate(self.scene.test_camera):
-                            if dataset_idxs is not None:
-                                if i < dataset_idxs[0]: # L-only tests
-                                    d_type = "L"
-                                elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
-                                    d_type = "V"
-                                else:
-                                    d_type = "LV"
-                            else:
-                                d_type = "LV"
-                                cnt += 1
-                            metric_results = self.test_step(test_cam, i, d_type)
-                        exit()
+                    #     test_size = len(self.scene.test_camera)
+                    #     dataset_idxs = self.scene.test_camera.subset_idxs
+                    #     cnt = 0
+                    #     for i, test_cam in enumerate(self.scene.test_camera):
+                    #         if dataset_idxs is not None:
+                    #             if i < dataset_idxs[0]: # L-only tests
+                    #                 d_type = "L"
+                    #             elif i < dataset_idxs[0] + dataset_idxs[1]: # V-only test
+                    #                 d_type = "V"
+                    #             else:
+                    #                 d_type = "LV"
+                    #         else:
+                    #             d_type = "LV"
+                    #             cnt += 1
+                    #         metric_results = self.test_step(test_cam, i, d_type)
+                    #     exit()
 
 
                 with torch.no_grad():
@@ -366,7 +368,8 @@ class GUIBase:
                 view_args={
                     "vis_mode":self.vis_mode,
                     "stage":self.stage,
-                    "finecoarse_flag":self.finecoarse_flag
+                    "finecoarse_flag":self.finecoarse_flag,
+                    "exposure":self.exposure
                 },
                 mip_level=self.opt.mip_level
         )
@@ -823,6 +826,17 @@ class GUIBase:
                         self.switch_off_viewer = True
                         self.play_custom_video = True
                         self.save_custom_video = True
+                    
+                    def callback_exposure_control(sender):
+                        self.exposure = dpg.get_value(sender)
+                    dpg.add_text(" : Set RIC-IBL Exposure : ")
+                    dpg.add_slider_float(
+                        label="Exposure",
+                        default_value=0.,
+                        max_value=1.,
+                        min_value=0.,
+                        callback=callback_exposure_control,
+                    )
                     
                     dpg.add_text(" : Inset video IBL : ") 
                     with dpg.group(horizontal=True):
