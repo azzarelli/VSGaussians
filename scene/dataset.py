@@ -27,7 +27,7 @@ class FourDGSdataset(Dataset):
         
     def __getitem__(self, index):
         dataset = self.dataset
-            
+
         cam = Camera(
             R=dataset[index].R, T=dataset[index].T,
             fx=dataset[index].fx, fy=dataset[index].fy,
@@ -38,13 +38,17 @@ class FourDGSdataset(Dataset):
             width=dataset[index].width, height=dataset[index].height,
 
             time=dataset[index].time,
+            
+            offset=dataset[index].offset,
 
             image_path=dataset[index].image_path,
             sceneoccluded_path=dataset[index].so_path,
             canon_path=dataset[index].canon_path,
             
             uid=dataset[index].uid,
-            data_device=torch.device("cuda"), 
+            data_device=torch.device("cuda"),
+            
+            
         )
         
         if self.loading_flags["image"]:

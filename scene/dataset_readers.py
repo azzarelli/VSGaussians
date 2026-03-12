@@ -32,11 +32,12 @@ class CameraInfo(NamedTuple):
     canon:torch.Tensor
     mask: torch.Tensor
 
-
     uid: int    
     width: int
     height: int
     time : int
+    
+    offset:list
    
 class SceneInfo(NamedTuple):
     train_cameras: list
@@ -90,6 +91,10 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
     g_p1 = contents.get("p1")
     g_p2 = contents.get("p2")
 
+    # Also fetch offsets
+    with open(f"{path}/offsets.json", "r") as offst_fp:
+        offsets = json.load(offst_fp)
+
     # Nerfstudio normalization (transform + scale)
     frames = contents["frames"]
     for idx, frame in enumerate(frames):
@@ -125,6 +130,7 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
             canon=None,
             mask=None,
             time=float(frame.get("time", -1.0)),
+            offset=[]
         ))
     cam_infos.sort(key=lambda c: os.path.basename(c.image_path))
 
@@ -206,12 +212,12 @@ def readCamerasFromTransforms(path, transformsfile, plot=False):
 
         fig.show()
         exit()
-    return cam_infos
+    return cam_infos, offsets
 
 from torchvision import transforms as T
 TRANSFORM = T.ToTensor()
 
-def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
+def readCamerasFromCanon(path, canon_cams, offsets, M=19, preload_gpu=False, subset=1):
     background_path = os.path.join(path, 'meta', 'backgrounds')
     background_im_paths = [os.path.join(background_path, f) for f in sorted(os.listdir(background_path))]
     relit_path = os.path.join(path, 'meta', 'images')
@@ -252,6 +258,10 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
                     im_path = os.path.join(relit_path, cam_name, im_name)
                     mask_path = os.path.join(masks_path, f'{cam_name}.png')
                     
+                    offset_vals = offsets[cam_name.replace("cam", "")]
+                    offset_dist = (int(im_name[:-4])-1)/98
+                    offset_vals = [round(offset_vals[0] * offset_dist), round(offset_vals[1] * offset_dist)]
+
                     # Load 
                     if preload_gpu:
                         img = Image.open(im_path).convert("RGB")
@@ -296,6 +306,8 @@ def readCamerasFromCanon(path, canon_cams, M=19, preload_gpu=False, subset=1):
                         mask=mask,
                         
                         time = time,
+                        
+                        offset=offset_vals
                     )
                     relit_cams.append(cam_info)
             store_bck = False
@@ -379,7 +391,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
     assert N_test_frames >-1, f"--test-frames needs to be > -1"
     
     # Read camera transforms    
-    canon_cam_infos = readCamerasFromTransforms(path, 'transforms.json')
+    canon_cam_infos, offsets = readCamerasFromTransforms(path, 'transforms.json')
     
     if path.split('/')[-1] == 'scene3' and cam_config in [6, 12]:
         if cam_config == 6:
@@ -405,7 +417,7 @@ def readSceneInfo(path, preload_imgs=False, additional_dataset_args=1, N_test_fr
             
         M = 19
     # This should return 18x33=627 CameraInfo classes
-    cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, M=M, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
+    cam_infos, background_paths = readCamerasFromCanon(path, canon_cam_infos, offsets, M=M, preload_gpu=preload_imgs, subset=additional_dataset_args)  # L should be the number of background paths
     
     L = len(background_paths)
     assert N_test_frames < L, f"--test-frames needs to be < {L} (the # of background textures)"

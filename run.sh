@@ -4,8 +4,8 @@ SAVEDIR=$1
 EXP_NAME=$2
 
 # Try to determine base path automatically
-if [ -d "/media/barry/56EA40DEEA40BBCD/DATA/$SAVEDIR" ]; then
-  BASEDIR="/media/barry/56EA40DEEA40BBCD/DATA"
+if [ -d "/media/barry/56EA40DEEA40BBCD1/DATA/$SAVEDIR" ]; then
+  BASEDIR="/media/barry/56EA40DEEA40BBCD1/DATA"
 elif [ -d "/data/$SAVEDIR" ]; then
   BASEDIR="/data"
 else

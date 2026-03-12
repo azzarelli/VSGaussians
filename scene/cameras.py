@@ -26,6 +26,8 @@ class Camera(nn.Module):
                  canon_path=None,
                  sceneoccluded_path=None,
                  diff_path=None,
+                 
+                 offset=[],
                 
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  ):
@@ -68,6 +70,8 @@ class Camera(nn.Module):
         self.canon = None
         self.sceneoccluded_mask = None
         self.diff_image = None
+        
+        self.offset = offset
     
     
     def update_K(self):

@@ -25,7 +25,22 @@ from utils.image_utils import psnr, mse, rgb_to_ycbcr
 from gaussian_renderer import render_extended, render_IBL_source
 
 
+def aligned_crops(pred, gt, dx, dy):
+    B, C, H, W = pred.shape
 
+    x0_pred = max(0, dx)
+    x0_gt   = max(0, -dx)
+
+    y0_pred = max(0, dy)
+    y0_gt   = max(0, -dy)
+
+    width  = W - abs(dx)
+    height = H - abs(dy)
+
+    pred_crop = pred[:, :, y0_pred:y0_pred+height, x0_pred:x0_pred+width]
+    gt_crop   = gt[:, :, y0_gt:y0_gt+height, x0_gt:x0_gt+width]
+
+    return pred_crop, gt_crop
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 import matplotlib.pyplot as plt
@@ -204,29 +219,56 @@ class GUI(GUIBase):
 
         self.gaussians.pre_backward(self.iteration, info)
 
-        # Fetch and load training data
-        render_gt = torch.cat([cam.image.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-        masked_gt = torch.cat([cam.sceneoccluded_mask.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-        canons_gt = torch.cat([cam.canon.unsqueeze(0) for cam in viewpoint_cams], dim=0).cuda()
-        gt_out = render_gt* masked_gt
-        canon_out = canons_gt* masked_gt
-        
+        images = torch.stack([cam.image for cam in viewpoint_cams]).cuda()
+        masks  = torch.stack([cam.sceneoccluded_mask for cam in viewpoint_cams]).cuda()
+        canon_gt = torch.stack([cam.canon for cam in viewpoint_cams]).cuda()
 
-        # Loss Functions
-        deform_loss = l1_loss(render, gt_out)
+        gt_out = images * masks
+        canon_out = canon_gt * masks
+
+
+        # Render loss (needs alignment)
+        deform_loss = 0.
+        dssim_loss = 0.
+
+        for i, cam in enumerate(viewpoint_cams):
+
+            dx, dy = cam.offset
+
+            r, g = aligned_crops(
+                render[i:i+1],
+                gt_out[i:i+1],
+                dx,
+                dy
+            )
+
+            deform_loss += l1_loss(r, g)
+            dssim_loss += (1 - ssim(r, g)) / 2.
+
+
+        N = len(viewpoint_cams)
+        deform_loss /= N
+        dssim_loss /= N
+
+
+        # Other losses
         canon_loss = l1_loss(canon, canon_out)
-        dssim = (1-ssim(render, gt_out))/2.
-        
-        depth_loss = l1_loss(alpha, masked_gt) # we want depth to be 0 everywhere in the screen
-        # depth_loss = 0.
-        loss = (1-self.opt.lambda_dssim)*deform_loss + self.opt.lambda_dssim*dssim + self.opt.lambda_canon*canon_loss + 0.2*depth_loss
+        depth_loss = l1_loss(alpha, masks)
+
+
+        loss = (
+            (1 - self.opt.lambda_dssim) * deform_loss
+            + self.opt.lambda_dssim * dssim_loss
+            + self.opt.lambda_canon * canon_loss
+            + 0.2 * depth_loss
+        )
                    
         with torch.no_grad():
             if self.gui:
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                dpg.set_value("_log_canon", f"ssim {dssim.item():.5f} | canon {canon_loss.item():.5f}")
+                dpg.set_value("_log_canon", f"ssim {dssim_loss.item():.5f} | canon {canon_loss.item():.5f}")
                 # dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 

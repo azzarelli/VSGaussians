@@ -11,6 +11,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gsplat import DefaultStrategy, MCMCStrategy
 from plyfile import PlyData, PlyElement
 
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -438,7 +439,7 @@ class GaussianModel:
             ab_extra = template_shN[:, :2, :]
             
             texscale = torch.ones_like(torch.tensor(opacities, dtype=torch.float)) # bias towards the low res image
-            texscale = texscale + 0.01*torch.rand_like(texscale)
+            texscale = texscale - 0.05 + 0.01*torch.rand_like(texscale)
             texscale = torch.logit(texscale)
 
             #### Filter out points not in the physical scene ####
