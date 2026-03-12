@@ -423,7 +423,7 @@ def sample_texture(I, uv):
     uv = uv.permute(1,2,0).unsqueeze(0) # for grid_sample input we need, N,Hout,Wout,2, where N =1, and W=number of points
     
     # Scaling mip-maps
-    mip_samples = F.grid_sample(I.unsqueeze(0), uv, mode='bilinear', align_corners=False).squeeze(0)
+    mip_samples = F.grid_sample(I.unsqueeze(0), uv, mode='bilinear',padding_mode='border', align_corners=False).squeeze(0)
     return mip_samples
 
     
