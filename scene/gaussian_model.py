@@ -456,7 +456,7 @@ class GaussianModel:
             xyz_mask = xyz_mask.cpu().numpy()
             scales = scales[xyz_mask]
             rots = rots[xyz_mask]
-            opacities = opacities[xyz_mask]
+            opacities = torch.logit(opacities[xyz_mask]*0. + 1.)
             features_dc = features_dc[xyz_mask]
             features_extra = features_extra[xyz_mask]
             
