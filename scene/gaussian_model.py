@@ -437,7 +437,7 @@ class GaussianModel:
             ab_dc = template_sh0[:, :2, :] + 0.5 # Centre of mipmap
             ab_extra = template_shN[:, :2, :]
             
-            texscale = torch.zeros_like(torch.tensor(opacities, dtype=torch.float)) # bias towards the low res image
+            texscale = torch.ones_like(torch.tensor(opacities, dtype=torch.float)) # bias towards the low res image
             texscale = texscale + 0.01*torch.rand_like(texscale)
             texscale = torch.logit(texscale)
 
