@@ -25,7 +25,7 @@ from utils.image_utils import psnr, mse, rgb_to_ycbcr
 from gaussian_renderer import render_extended, render_IBL_source
 
 
-def aligned_crops(pred, gt, dx, dy):
+def aligned_crops(pred, gt, dx, dy, mask = None):
     B, C, H, W = pred.shape
 
     x0_pred = max(0, dx)
@@ -40,7 +40,10 @@ def aligned_crops(pred, gt, dx, dy):
     pred_crop = pred[:, :, y0_pred:y0_pred+height, x0_pred:x0_pred+width]
     gt_crop   = gt[:, :, y0_gt:y0_gt+height, x0_gt:x0_gt+width]
 
-    return pred_crop, gt_crop
+    if mask is None:
+        return pred_crop, gt_crop
+    else:
+        return pred_crop, gt_crop, mask[:, :, y0_pred:y0_pred+height, x0_pred:x0_pred+width]
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 import matplotlib.pyplot as plt
@@ -296,31 +299,50 @@ class GUI(GUIBase):
             [texture],
             mip_level=self.opt.mip_level
         )
-        
-        # Process data
+
+        # Process render
         relit = relit.squeeze(0)
 
-        mask = viewpoint_cams.sceneoccluded_mask.cuda()
-        gt_img = viewpoint_cams.image.cuda() #* (viewpoint_cams.sceneoccluded_mask.cuda())
-        
-        gt_out = gt_img * mask
+        # Ground truth
+        mask   = viewpoint_cams.sceneoccluded_mask.cuda()
+        gt_img = viewpoint_cams.image.cuda()
 
-        # Save image
-        if self.iteration > (self.final_iter - 500) or  index % 5 == 0:
-            save_im = mask*relit + (1.-mask)*gt_img
-            vutils.save_image(save_im, os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg"))
+        # Alignment (same logic used during training)
+        dx, dy = viewpoint_cams.offset
 
+        r, g, m = aligned_crops(
+            relit.unsqueeze(0),
+            gt_img.unsqueeze(0),
+            dx,
+            dy,
+            mask = mask.unsqueeze(0)
+        )
+
+        r = r.squeeze(0)
+        g = g.squeeze(0)
+        m = m.squeeze(0)
+
+        g = g * m
+        r = r * m
         
-        gt_ycc = rgb_to_ycbcr(gt_out).squeeze(0)
-        relit_ycc = rgb_to_ycbcr(relit).squeeze(0)
-    
-        
+        # Save visualization
+        if self.iteration > (self.final_iter - 500) or index % 5 == 0:
+            save_im = mask * relit + (1. - mask) * gt_img
+            vutils.save_image(
+                save_im,
+                os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg")
+            )
+
+        # Convert to YCbCr for metrics
+        gt_ycc = rgb_to_ycbcr(g).squeeze(0)
+        relit_ycc = rgb_to_ycbcr(r).squeeze(0)
+
         return {
-            "mse":mse(relit, gt_out),
-            "psnr":psnr(relit, gt_out),
-            "psnr-y":psnr(relit_ycc[0, ...], gt_ycc[0, ...]),
-            "psnr-crcb":psnr(relit_ycc[1:, ...], gt_ycc[1:, ...]),
-            "ssim":ssim(relit, gt_out)
+            "mse": mse(r, g),
+            "psnr": psnr(r, g),
+            "psnr-y": psnr(relit_ycc[0, ...], gt_ycc[0, ...]),
+            "psnr-crcb": psnr(relit_ycc[1:, ...], gt_ycc[1:, ...]),
+            "ssim": ssim(r.unsqueeze(0), g.unsqueeze(0))
         }
         
     @torch.no_grad
