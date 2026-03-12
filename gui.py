@@ -327,11 +327,12 @@ class GUI(GUIBase):
         
         # Save visualization
         if self.iteration > (self.final_iter - 500) or index % 5 == 0:
-            save_im = mask * relit + (1. - mask) * gt_img
-            vutils.save_image(
-                save_im,
-                os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg")
-            )
+            pass
+        save_im = mask * relit + (1. - mask) * gt_img
+        vutils.save_image(
+            save_im,
+            os.path.join(self.save_tests, f"{d_type}_{index:05}.jpg")
+        )
 
         # Convert to YCbCr for metrics
         gt_ycc = rgb_to_ycbcr(g).squeeze(0)
