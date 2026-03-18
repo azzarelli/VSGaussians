@@ -21,6 +21,9 @@ class GaussianModel:
             symm = strip_symmetric(actual_covariance)
             return symm
 
+        self.scaling_activation = torch.exp
+        self.scaling_inverse_activation = torch.log
+
         self.covariance_activation = build_covariance_from_scaling_rotation
 
         self.opacity_activation = torch.sigmoid
@@ -358,8 +361,7 @@ class GaussianModel:
         xyz_mask = xyz_mask.cpu().numpy()
         scales = scales[xyz_mask]
         rots = rots[xyz_mask]
-        x = opacities[xyz_mask] * 0. + 0.99
-        opacities = np.log(x / (1 - x))
+        opacities = opacities[xyz_mask]
         features_dc = features_dc[xyz_mask]
         features_extra = features_extra[xyz_mask]
         

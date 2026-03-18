@@ -26,4 +26,5 @@ python gui.py -s "$SAVEDIR" \
   --expname "$SAVEDIR/$EXP_NAME" \
   --configs "arguments/$ARGS" \
   --test_iterations 2000 \
+  --test-frames 32 \
   --subset 1 

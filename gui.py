@@ -253,8 +253,7 @@ class GUI(GUIBase):
 
 
         # Other losses
-        depth_loss = l1_loss(alpha, masks)
-
+        depth_loss = l1_loss(alpha.squeeze(-1), masks)
 
         loss = (
             (1 - self.opt.lambda_dssim) * deform_loss
