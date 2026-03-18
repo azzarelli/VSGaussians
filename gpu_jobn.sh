@@ -4,7 +4,7 @@
 #SBATCH --output=baseline.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
-#SBATCH --time=03:00:00
+#SBATCH --time=02:30:00
 
 module load cray-python
 module load cudatoolkit
@@ -12,19 +12,16 @@ module load cudatoolkit
 source ~/miniforge3/bin/activate
 conda activate vsenv
 
-SAVEDIR=$HOME/data/studio_test5/scene2
+SAVEDIR=$HOME/data/studio_test5/scene1
 
-ARGS="baseline.py"
 EXP_NAME="baseline"
 
-
 echo "Running with:"
-echo "  CONFIG: $ARGS"
 echo "  EXP_NAME: $EXP_NAME"
 
 python gui.py -s "$SAVEDIR" \
   --expname "$SAVEDIR/$EXP_NAME" \
-  --configs "arguments/$ARGS" \
+  --configs "arguments/baseline.py" \
   --test_iterations 2000 \
   --test-frames 32 \
   --subset 1 
