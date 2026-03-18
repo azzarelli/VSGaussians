@@ -21,12 +21,8 @@ def process_Gaussians(pc):
 def process_full_Gaussians(pc):
     # Use existing function for processing canon
     means3D, rotations, opacity, colors, scales = process_Gaussians(pc)
-    
-    invariance = pc.get_lambda
-    texsample = pc.get_ab
-    texscale = pc.get_texscale
         
-    return means3D, rotations, opacity, colors, scales, texsample, texscale, invariance
+    return means3D, rotations, opacity, colors, scales
 
 def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, sh_deg=3, mode="RGB+D"):
     if mode in ['normals', '2D']:
@@ -200,21 +196,9 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
     
     if view_args["finecoarse_flag"]:
 
-        if view_args['vis_mode'] not in ['invariance', 'deform', 'uv', 'sigma']:
-            means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
-            invariance = None
-        else:
-            means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
+        means3D, rotation, opacity, colors, scales = process_Gaussians(pc)
+        invariance = None
             
-            shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
-            dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(texsample.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
-            
-            shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
         
         active_sh = pc.active_sh_degree
         # Set arguments depending on type of viewing
@@ -230,22 +214,12 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             mode = "D"
         elif view_args['vis_mode'] == 'ED':
             mode = "ED"
-        elif view_args['vis_mode'] in ['invariance', 'uv', 'sigma']:
-            mode = "invariance"
-            if view_args['vis_mode']  == 'uv':
-                invariance = texsample_ab
-            elif view_args['vis_mode']  == 'sigma':
-                invariance = texscale
         elif view_args['vis_mode'] == 'xyz':
             mean_max = means3D.max()
             mean_min = means3D.min()
             colors = (means3D - mean_min) / (mean_max - mean_min)
             colors = means3D.unsqueeze(0)
             
-        elif view_args['vis_mode'] == 'deform':
-            colors = sample_mipmap(texture, texsample_ab, texscale, num_levels=2).unsqueeze(0)
-            # colors = (colors.sum(-1).unsqueeze(-1) < 0.01).repeat(1,1,3).float()
-
         # Change for rendering with rgb instead of shs
         if view_args['vis_mode'] in ["deform", "xyz"]:
             mode = "RGB"
@@ -279,14 +253,6 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = (render - render.min())/ (render.max() - render.min())
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
-        elif view_args['vis_mode'] == 'invariance':
-            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
-        elif view_args['vis_mode'] == 'uv':
-            render = render.squeeze(0).permute(2,0,1)
-            render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
-        elif view_args['vis_mode'] == 'sigma':
-            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)*5.
-
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
 
@@ -301,9 +267,6 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
         if abc is not None:
             # t1 = time.time()
             ibl = render_IBL_source(viewpoint_camera, abc, texture)
-            # if blending_mask is not None:
-            #     alpha = blending_mask.unsqueeze(0)
-
             
             render =  render * (alpha) + (1. - alpha) * ibl
             # t2 = time.time()
@@ -321,7 +284,7 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     """
     # t1 = time.time()
     # Sample triplanes and return Gaussian params + a,b,lambda
-    means3D, rotation, opacity, colors, scales, texsample, texscale, invariance = process_full_Gaussians(pc)
+    means3D, rotation, opacity, colors, scales = process_full_Gaussians(pc)
     # t2 = time.time()
     # Precompute point a,b,s texture indexing
     colors_final = []
@@ -333,22 +296,9 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
 
-        shs_view = texsample.transpose(1, 2).view(-1, 2, 16)
-        sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-        texsample_ab = torch.clamp_min(sh2rgb + 0.5, 0.0)
-        
-        shs_view = invariance.transpose(1, 2).view(-1, invariance.shape[-1], 16)
-        sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-        tex_invariance = torch.clamp_min(sh2rgb + 0.5, 0.0)
-        
-        colors_ibl = sample_mipmap(texture.cuda(), texsample_ab, texscale, num_levels=mip_level)
-        color_d = tex_invariance*colors_ibl
-        colors_final.append((colors_precomp + color_d).unsqueeze(0))
-        
+        colors_final.append((colors_precomp).unsqueeze(0))
     colors_final = torch.cat(colors_final, dim=0)
-    
-    # t3 = time.time()
-    
+        
     M = len(textures)
     means3D_final = means3D.unsqueeze(0).repeat(M, 1, 1)
     rotation_final = rotation.unsqueeze(0).repeat(M, 1, 1)
@@ -370,24 +320,6 @@ def render_extended(viewpoint_camera, pc, textures, return_canon=False, mip_leve
     colors_deform = colors_deform.squeeze(1).permute(0, 3, 1, 2)
     # t4 = time.time()
     # print(f"G-call {1./(t2-t1):.4f} MipSamp{1./(t3-t2):.4f} Rend {1./(t4-t3):.4f}")
-    
-    if return_canon:
-        colors_canon, _, _ = rendering_pass(
-            means3D, 
-            rotation, 
-            scales, 
-            opacity, 
-            colors, 
-            None, 
-            viewpoint_camera, 
-            pc.active_sh_degree,
-            mode="RGB"
-        )
-
-        colors_canon = colors_canon.squeeze(1).permute(0, 3, 1, 2)
-        alpha = alpha.squeeze(1).permute(0, 3, 1, 2)
-
-        return colors_deform, colors_canon, alpha, meta
     return colors_deform, (meta, alpha)
 
 
@@ -410,64 +342,3 @@ def render_canonical(viewpoint_camera, pc):
     )
 
     return colors.squeeze(0).permute(0, 3, 1, 2), meta
-
-
-
-import torch.nn.functional as F
-def generate_mipmaps(I, num_levels=3):
-    I = I.unsqueeze(0)
-    maps = [I]    
-    for _ in range(1, num_levels):
-        # I progressively downsampled
-        I = F.interpolate(
-            I, scale_factor=0.5,
-            mode='bilinear', align_corners=False,
-            recompute_scale_factor=True
-        )
-        # Add zero padding
-        I_ = I
-        maps.append(I_)
-    return maps
-
-def sample_mipmap(I, uv, s, num_levels=3):
-    """
-    args:
-        uv, Tensor, N,2
-        s, Tensor, N,1
-        I, Tensor, 3, H, W
-    """
-    N = s.size(0)
-    
-    # print(I.shape)
-    # exit()
-    # 1. Generate mipmaps
-    maps = generate_mipmaps(I, num_levels=num_levels)
-    
-    # Normalize us -1, 1 (from 0, 1)
-    uv = 2.*uv -1.
-    uv = uv.unsqueeze(0).unsqueeze(0) # for grid_sample input we need, N,Hout,Wout,2, where N =1, and W=number of points
-    
-    # Scaling mip-maps
-    L = s*(num_levels-1.)
-    lower = torch.floor(L).long().clamp(max=num_levels-1)
-    upper = torch.clamp(lower + 1, max=num_levels-1)
-    s_interp = (L - lower.float())
-
-    # Initialize mipmap samples
-    mip_samples = torch.empty((N, num_levels, 3), device=s.device)    
-
-    # For each map sample using u,v and store the values in samples
-    for idx, map in enumerate(maps):
-        # map is (1, 3, h, w)
-        mip_samples[:, idx] = F.grid_sample(map, uv, mode='bilinear', align_corners=False, padding_mode='border').squeeze(2).squeeze(0).permute(1,0)
-
-    gather_idx_low  = lower.view(N, 1, 1).expand(-1, 1, 3)
-    gather_idx_high = upper.view(N, 1, 1).expand(-1, 1, 3)
-    colors_low  = torch.gather(mip_samples, 1, gather_idx_low).squeeze(1)   # [N,3]
-    colors_high = torch.gather(mip_samples, 1, gather_idx_high).squeeze(1) 
-    
-    colors = (1. - s_interp) * colors_low + s_interp * colors_high
-
-    return colors
-
-    

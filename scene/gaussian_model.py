@@ -21,9 +21,6 @@ class GaussianModel:
             symm = strip_symmetric(actual_covariance)
             return symm
 
-        self.scaling_activation = torch.exp
-        self.scaling_inverse_activation = torch.log
-
         self.covariance_activation = build_covariance_from_scaling_rotation
 
         self.opacity_activation = torch.sigmoid
@@ -39,10 +36,7 @@ class GaussianModel:
 
         
         self.gsplat_optimizers = None
-        
         self.spatial_lr_scale = 0
-        self.spatial_lr_scale_background = 0
-        self.target_neighbours = None
         
         self.use_default_strategy = False
         
@@ -52,14 +46,13 @@ class GaussianModel:
         return (
             self.active_sh_degree,
             self.splats,
-            self.spatial_lr_scale,
-            self.spatial_lr_scale_background
+            self.spatial_lr_scale
         )
 
     def restore(self, model_args, training_args):
         (self.active_sh_degree,
         self.splats,
-        self.spatial_lr_scale,self.spatial_lr_scale_background) = model_args
+        self.spatial_lr_scale) = model_args
         
         self.training_setup(training_args)
 
@@ -114,22 +107,6 @@ class GaussianModel:
         features_dc = self.splats['sh0']
         features_rest = self.splats['shN']
         return torch.cat((features_dc, features_rest), dim=1)
-    
-    @property
-    def get_lambda(self):
-        features_dc = self.splats['lambda_sh0']
-        features_rest = self.splats['lambda_shN']
-        return torch.cat((features_dc, features_rest), dim=1)
-    
-    @property
-    def get_ab(self):
-        features_dc = self.splats['ab_sh0']
-        features_rest = self.splats['ab_shN']
-        return torch.cat((features_dc, features_rest), dim=1)
-    
-    @property
-    def get_texscale(self):
-        return torch.sigmoid(self.splats["tex_scale"])
     
     @property
     def get_scaling(self):
@@ -237,7 +214,7 @@ class GaussianModel:
 
     def pre_train_step(self, iteration, max_iterations, stage):
         """Run pre-training step functions"""
-        if iteration % 100 == 0:
+        if iteration % 500 == 0:
             self.oneupSHdegree()
             
         return None    
@@ -291,19 +268,6 @@ class GaussianModel:
         for i in range(self.splats["quats"].shape[1]):
             l.append('rot_{}'.format(i))
             
-        for i in range(self.splats["lambda_sh0"].shape[1]*self.splats["lambda_sh0"].shape[2]):
-            l.append('lambda_dc_{}'.format(i))
-        for i in range(self.splats["lambda_shN"].shape[1]*self.splats["lambda_shN"].shape[2]):
-            l.append('lambda_rest_{}'.format(i))
-            
-        for i in range(self.splats["ab_sh0"].shape[1]*self.splats["ab_sh0"].shape[2]):
-            l.append('ab_dc_{}'.format(i))
-        for i in range(self.splats["ab_shN"].shape[1]*self.splats["ab_shN"].shape[2]):
-            l.append('ab_rest_{}'.format(i))
-            
-        for i in range(self.splats["tex_scale"].shape[1]):
-            l.append('texscale_{}'.format(i))
-
         return l
     
     def load_model(self, path):
@@ -324,20 +288,10 @@ class GaussianModel:
         f_dc = self.splats["sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         f_rest = self.splats["shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         
-        lambda_dc = self.splats["lambda_sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-        lambda_rest = self.splats["lambda_shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-        
-        ab_dc = self.splats["ab_sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-        ab_rest = self.splats["ab_shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-        
-        texscale = self.splats["tex_scale"].detach().cpu().numpy()
-
-        
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation,
-                                     lambda_dc, lambda_rest, ab_dc, ab_rest, texscale), axis=1)
+        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
         # attributes = np.concatenate((xyz, normals, colors, opacities, scale, rotation), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
@@ -389,83 +343,25 @@ class GaussianModel:
             features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
+                
+        #### Filter out points not in the physical scene ####
+        num_train_frames = int(len(cams) / (num_cams-1))
+        target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
+
+        xyz_mask = means[:, 0].clone()*0.
+        for cam in target_cams:
+            inds = cam.screenspace_xyz_search(means.cpu())
+            xyz_mask[inds] += 1
+        xyz_mask = (xyz_mask < 1).cuda()
         
-        try: # Try to load the relighting parameters, if not we need to construct them ourselves
-            lambda_dc = np.zeros((xyz.shape[0], 1, 1))
-            lambda_dc[:, 0, 0] = np.asarray(plydata.elements[0]["lambda_dc_0"])
-            # lambda_dc[:, 1, 0] = np.asarray(plydata.elements[0]["lambda_dc_1"])
-            # lambda_dc[:, 2, 0] = np.asarray(plydata.elements[0]["lambda_dc_2"])
-
-            lambda_dc = torch.tensor(features_dc, dtype=torch.float)
-            
-            extra_lambda_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("lambda_rest_")]
-            extra_lambda_names = sorted(extra_lambda_names, key = lambda x: int(x.split('_')[-1]))
-            lambda_extra = np.zeros((xyz.shape[0], len(extra_lambda_names)))
-            for idx, attr_name in enumerate(extra_lambda_names):
-                lambda_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            lambda_extra = lambda_extra.reshape((lambda_extra.shape[0], 1, (self.max_sh_degree + 1) ** 2 - 1))
-            lambda_extra = torch.tensor(lambda_extra, dtype=torch.float)
-
-            
-            ab_dc = np.zeros((xyz.shape[0], 2, 1))
-            ab_dc[:, 0, 0] = np.asarray(plydata.elements[0]["ab_dc_0"])
-            ab_dc[:, 1, 0] = np.asarray(plydata.elements[0]["ab_dc_1"])
-            ab_dc = torch.tensor(ab_dc, dtype=torch.float)
-
-            extra_ab_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("ab_rest_")]
-            extra_ab_names = sorted(extra_ab_names, key = lambda x: int(x.split('_')[-1]))
-            ab_extra = np.zeros((xyz.shape[0], len(extra_ab_names)))
-            for idx, attr_name in enumerate(extra_ab_names):
-                ab_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            ab_extra = ab_extra.reshape((ab_extra.shape[0], 2, (self.max_sh_degree + 1) ** 2 - 1))
-            ab_extra = torch.tensor(ab_extra, dtype=torch.float)
-            
-            texscale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("tex_scale_")]
-            texscale = np.zeros((xyz.shape[0], len(texscale_names)))
-            for idx, attr_name in enumerate(texscale_names):
-                texscale[:, idx] = np.asarray(plydata.elements[0][attr_name])
-            
-            texscale = torch.tensor(texscale, dtype=torch.float)
-        except:
-            print('Loading previous relighting parameters failed (this is an error if you are loading a checkpoint but not if you are initializing)')
-            
-            template_sh0 = torch.zeros_like(torch.tensor(features_dc, dtype=torch.float))
-            template_shN = torch.zeros_like(torch.tensor(features_extra, dtype=torch.float))
-            
-            lambda_dc = template_sh0[:, :1, :] + 0.01 # bias towards object color
-            lambda_extra = template_shN[:, :1, :]
-
-            ab_dc = template_sh0[:, :2, :] + 0.5 # Centre of mipmap
-            ab_extra = template_shN[:, :2, :]
-            
-            texscale = torch.ones_like(torch.tensor(opacities, dtype=torch.float)) # bias towards the low res image
-            texscale = texscale - 0.05 + 0.01*torch.rand_like(texscale)
-            texscale = torch.logit(texscale)
-
-            #### Filter out points not in the physical scene ####
-            num_train_frames = int(len(cams) / (num_cams-1))
-            target_cams = [cam for idx, cam in enumerate(cams) if (idx % num_train_frames) == 0]
-
-            xyz_mask = means[:, 0].clone()*0.
-            for cam in target_cams:
-                inds = cam.screenspace_xyz_search(means.cpu())
-                xyz_mask[inds] += 1
-            xyz_mask = (xyz_mask < 1).cuda()
-            
-            means = means[xyz_mask]
-            xyz_mask = xyz_mask.cpu().numpy()
-            scales = scales[xyz_mask]
-            rots = rots[xyz_mask]
-            opacities = torch.logit(opacities[xyz_mask]*0. + 1.)
-            features_dc = features_dc[xyz_mask]
-            features_extra = features_extra[xyz_mask]
-            
-            lambda_dc = lambda_dc[xyz_mask]
-            lambda_extra = lambda_extra[xyz_mask]
-            ab_dc = ab_dc[xyz_mask]
-            ab_extra = ab_extra[xyz_mask]
-            texscale = texscale[xyz_mask]
-
+        means = means[xyz_mask]
+        xyz_mask = xyz_mask.cpu().numpy()
+        scales = scales[xyz_mask]
+        rots = rots[xyz_mask]
+        x = opacities[xyz_mask] * 0. + 0.99
+        opacities = np.log(x / (1 - x))
+        features_dc = features_dc[xyz_mask]
+        features_extra = features_extra[xyz_mask]
         
         mean_foreground = means.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(means - mean_foreground, dim=1)
@@ -480,14 +376,6 @@ class GaussianModel:
             ("opacities",nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True)), training_args.opacity_lr),
             ("sh0", nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr),
             ("shN", nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True)), training_args.feature_lr/20.),
-
-            ("lambda_sh0", nn.Parameter(lambda_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.lambda_lr),
-            ("lambda_shN", nn.Parameter(lambda_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.lambda_lr/20.),
-            
-            ("ab_sh0", nn.Parameter(ab_dc.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.tex_mu_lr),
-            ("ab_shN", nn.Parameter(ab_extra.cuda().transpose(1, 2).contiguous().requires_grad_(True)), training_args.tex_mu_lr/20.),
-            ("tex_scale",nn.Parameter(texscale.cuda().requires_grad_(True)), training_args.tex_s_lr),
-
             
         }
         self.splats = torch.nn.ParameterDict({n: v for n, v, _ in self.params}).cuda()

@@ -212,22 +212,20 @@ class GUI(GUIBase):
             id1 = cam.time
             textures.append(self.scene.ibl[id1])
         
-        render, canon, alpha, info = render_extended(
+        render, meta = render_extended(
             viewpoint_cams, 
             self.gaussians,
             textures,
-            return_canon=True,
             mip_level=self.opt.mip_level
         )
+        info = meta[0]
+        alpha = meta[1]
 
         self.gaussians.pre_backward(self.iteration, info)
 
         images = torch.stack([cam.image for cam in viewpoint_cams]).cuda()
         masks  = torch.stack([cam.sceneoccluded_mask for cam in viewpoint_cams]).cuda()
-        canon_gt = torch.stack([cam.canon for cam in viewpoint_cams]).cuda()
-
         gt_out = images * masks
-        canon_out = canon_gt * masks
 
 
         # Render loss (needs alignment)
@@ -255,14 +253,12 @@ class GUI(GUIBase):
 
 
         # Other losses
-        canon_loss = l1_loss(canon, canon_out)
         depth_loss = l1_loss(alpha, masks)
 
 
         loss = (
             (1 - self.opt.lambda_dssim) * deform_loss
             + self.opt.lambda_dssim * dssim_loss
-            + self.opt.lambda_canon * canon_loss
             + 0.2 * depth_loss
         )
                    
@@ -271,8 +267,6 @@ class GUI(GUIBase):
                 dpg.set_value("_log_iter", f"{self.iteration} / {self.final_iter} its")
                 
                 dpg.set_value("_log_relit", f"Relit Loss: {deform_loss.item()}")
-                dpg.set_value("_log_canon", f"ssim {dssim_loss.item():.5f} | canon {canon_loss.item():.5f}")
-                # dpg.set_value("_log_deform", f"mask {depth_loss.item():.5f}")
                 dpg.set_value("_log_points", f"Point Count: {self.gaussians.get_xyz.shape[0]}")
 
             
