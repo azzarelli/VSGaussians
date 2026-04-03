@@ -13,10 +13,10 @@ module load cudatoolkit
 source ~/miniforge3/bin/activate
 conda activate vsenv
 
-SAVEDIR=$HOME/data/studio_test5/scene2
+SAVEDIR=$HOME/data/studio_test5/scene3
 
 ARGS="baseline.py"
-EXP_NAME="baseline_subset${SLURM_ARRAY_TASK_ID}"
+EXP_NAME="set${SLURM_ARRAY_TASK_ID}"
 
 echo "Running with:"
 echo "  CONFIG: $ARGS"
