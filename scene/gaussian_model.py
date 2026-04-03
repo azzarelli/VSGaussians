@@ -393,19 +393,17 @@ class GaussianModel:
         try: # Try to load the relighting parameters, if not we need to construct them ourselves
             lambda_dc = np.zeros((xyz.shape[0], 1, 1))
             lambda_dc[:, 0, 0] = np.asarray(plydata.elements[0]["lambda_dc_0"])
-            # lambda_dc[:, 1, 0] = np.asarray(plydata.elements[0]["lambda_dc_1"])
-            # lambda_dc[:, 2, 0] = np.asarray(plydata.elements[0]["lambda_dc_2"])
 
-            lambda_dc = torch.tensor(features_dc, dtype=torch.float)
+            lambda_dc = torch.tensor(lambda_dc, dtype=torch.float)
             
             extra_lambda_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("lambda_rest_")]
+
             extra_lambda_names = sorted(extra_lambda_names, key = lambda x: int(x.split('_')[-1]))
             lambda_extra = np.zeros((xyz.shape[0], len(extra_lambda_names)))
             for idx, attr_name in enumerate(extra_lambda_names):
                 lambda_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
             lambda_extra = lambda_extra.reshape((lambda_extra.shape[0], 1, (self.max_sh_degree + 1) ** 2 - 1))
             lambda_extra = torch.tensor(lambda_extra, dtype=torch.float)
-
             
             ab_dc = np.zeros((xyz.shape[0], 2, 1))
             ab_dc[:, 0, 0] = np.asarray(plydata.elements[0]["ab_dc_0"])
@@ -420,7 +418,7 @@ class GaussianModel:
             ab_extra = ab_extra.reshape((ab_extra.shape[0], 2, (self.max_sh_degree + 1) ** 2 - 1))
             ab_extra = torch.tensor(ab_extra, dtype=torch.float)
             
-            texscale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("tex_scale_")]
+            texscale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("texscale_")]
             texscale = np.zeros((xyz.shape[0], len(texscale_names)))
             for idx, attr_name in enumerate(texscale_names):
                 texscale[:, idx] = np.asarray(plydata.elements[0][attr_name])

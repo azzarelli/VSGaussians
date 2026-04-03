@@ -153,9 +153,9 @@ class GUI(GUIBase):
 
         self.gaussians.training_setup(self.opt)
 
-        if self.checkpoint:
-            (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_{self.checkpoint}.pth')
-            self.gaussians.restore(model_params, self.opt)
+        # if self.checkpoint:
+        #     (model_params, first_iter) = torch.load(f'{self.expname}/chkpnt_{self.checkpoint}.pth')
+        #     self.gaussians.restore(model_params, self.opt)
 
         # Set current iteration
         self.iteration = first_iter

@@ -26,5 +26,5 @@ else
     --configs arguments/baseline.py \
     --test_iterations 2000 \
     --subset $3 \
-    --test-frames 32
+    --test-frames 23
 fi
