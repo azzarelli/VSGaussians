@@ -189,6 +189,25 @@ def render_ibl_pose_points(cam, abc, mip_level):
     rgba = torch.cat([render, alpha], dim=-1).squeeze(0).permute(2,0,1)
     return rgba
 
+def apply_colormap(render, threshold=0.0001):
+    render = render.squeeze(-1)  # (H, W)
+    
+    mask = render > threshold  # (H, W)
+    
+    # Normalize to [0, 1]
+    # render = (render - render.min()) / (render.max() - render.min() + 1e-8)
+    
+    # Red -> Blue
+    r = 1.0 - render
+    g = torch.zeros_like(render)
+    b = render
+    
+    rgb = torch.stack([r, g, b], dim=0)  # (3, H, W)
+    
+    # Zero out background pixels
+    rgb = rgb * mask.unsqueeze(0)
+    
+    return rgb
 
 @torch.no_grad
 def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blending_mask=None):
@@ -280,12 +299,12 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] == 'invariance':
-            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
+            render = render.squeeze(0).permute(2,0,1)
         elif view_args['vis_mode'] == 'uv':
             render = render.squeeze(0).permute(2,0,1)
             render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
         elif view_args['vis_mode'] == 'sigma':
-            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)*5.
+            render = apply_colormap(render.squeeze(0))  # (3, H, W)
 
         elif view_args['vis_mode'] in 'deform':
             render = render.squeeze(0).permute(2,0,1)
