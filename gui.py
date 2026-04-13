@@ -174,6 +174,10 @@ class GUI(GUIBase):
                 self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                     num_workers=16, collate_fn=list))
 
+            self.filter_3D_stack = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % self.N_test_frames == 0][:-2]
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+
+        
     @property
     def get_batch_views(self): 
         
@@ -204,6 +208,9 @@ class GUI(GUIBase):
                 4. Processing the new color as 
                     c' = l.c + (1-l).c_mipmap
         """
+        if self.iteration % 500 == 0 and self.iteration > 10: # update the mipsplat 3d filter frequently 
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations, 'fine')
 
         # Sample the background image
