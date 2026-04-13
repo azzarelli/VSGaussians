@@ -299,7 +299,7 @@ def render(viewpoint_camera, pc, abc, texture, view_args=None, mip_level=2, blen
             render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
             
         elif view_args['vis_mode'] == 'invariance':
-            render = render.squeeze(0).permute(2,0,1)
+            render = render.squeeze(0).permute(2,0,1).repeat(3,1,1)
         elif view_args['vis_mode'] == 'uv':
             render = render.squeeze(0).permute(2,0,1)
             render = torch.cat([render, render[0].unsqueeze(0)*0.], dim=0)
