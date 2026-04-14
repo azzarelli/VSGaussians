@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=baseline_subset
-#SBATCH --output=baseline_subset_%a.out
+#SBATCH --job-name=MipSplat3
+#SBATCH --output=MipSplat_3%a.out
 #SBATCH --gpus=1
 #SBATCH --ntasks-per-gpu=1
 #SBATCH --time=03:00:00
@@ -16,7 +16,7 @@ conda activate vsenv
 SAVEDIR=$HOME/data/studio_test5/scene3
 
 ARGS="baseline.py"
-EXP_NAME="set${SLURM_ARRAY_TASK_ID}"
+EXP_NAME="MipSplat{$SLURM_ARRAY_TASK_ID}"
 
 echo "Running with:"
 echo "  CONFIG: $ARGS"

@@ -208,8 +208,7 @@ class GUI(GUIBase):
                 4. Processing the new color as 
                     c' = l.c + (1-l).c_mipmap
         """
-        if self.iteration % 500 == 0 and self.iteration > 10: # update the mipsplat 3d filter frequently 
-            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+
 
         self.gaussians.pre_train_step(self.iteration, self.opt.iterations, 'fine')
 
@@ -294,6 +293,9 @@ class GUI(GUIBase):
 
         self.gaussians.post_backward(self.iteration, info, 'fine')
 
+        if self.iteration % 500 == 0 and self.iteration > 10: # update the mipsplat 3d filter frequently 
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
+            
     @torch.no_grad
     def test_step(self, viewpoint_cams, index, d_type):
         # Sample the background image
