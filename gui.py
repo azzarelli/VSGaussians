@@ -173,6 +173,9 @@ class GUI(GUIBase):
             if self.cpuloader:
                 self.loader = iter(DataLoader(self.viewpoint_stack, batch_size=self.opt.batch_size, shuffle=self.random_loader,
                                                     num_workers=16, collate_fn=list))
+                
+            self.filter_3D_stack = [cam for idx, cam in enumerate(self.scene.test_camera) if idx % self.N_test_frames == 0][:-2]
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
 
     @property
     def get_batch_views(self): 
@@ -279,6 +282,9 @@ class GUI(GUIBase):
         loss.backward()
 
         self.gaussians.post_backward(self.iteration, info, 'fine')
+        
+        if self.iteration % 500 == 0 and self.iteration > 10: # update the mipsplat 3d filter frequently 
+            self.gaussians.compute_3D_filter(cameras=self.filter_3D_stack)
 
     @torch.no_grad
     def test_step(self, viewpoint_cams, index, d_type):

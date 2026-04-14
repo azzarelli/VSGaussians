@@ -49,12 +49,14 @@ class GaussianModel:
         return (
             self.active_sh_degree,
             self.splats,
+            self.filter_3D,
             self.spatial_lr_scale
         )
 
     def restore(self, model_args, training_args):
         (self.active_sh_degree,
         self.splats,
+        self.filter_3D,
         self.spatial_lr_scale) = model_args
         
         self.training_setup(training_args)
@@ -103,7 +105,26 @@ class GaussianModel:
         distance[~valid_points] = distance[valid_points].max()
         #TODO box to gaussian transform
         filter_3D = distance / focal_length * (0.2 ** 0.5)
-        # self.filter_3D = filter_3D[..., None]
+        self.filter_3D = filter_3D[..., None]
+    
+    @property
+    def get_scaling_with_3D_filter(self):
+        scales = self.get_scaling
+        
+        scales = torch.square(scales) + torch.square(self.filter_3D)
+        scales = torch.sqrt(scales)
+        return scales
+
+    def get_fine_opacity_with_3D_filter(self, opacity):
+        scales = self.get_scaling
+        filter3D = self.filter_3D                
+        scales_square = torch.square(scales)
+        det1 = scales_square.prod(dim=1)
+        
+        scales_after_square = scales_square + torch.square(filter3D) 
+        det2 = scales_after_square.prod(dim=1) 
+        coef = torch.sqrt(det1 / det2)
+        return opacity * coef[..., None]
 
     @property
     def get_features(self):

@@ -10,9 +10,10 @@ def process_Gaussians(pc):
     means3D = pc.get_xyz
     colors = pc.get_features
     
-    opacity = pc.get_opacity
+    opacity = pc.get_fine_opacity_with_3D_filter(pc.get_opacity)
 
-    scales = pc.get_scaling #pc.get_scaling_with_3D_filter
+    # scales = pc.get_scaling 
+    scales = pc.get_scaling_with_3D_filter
     
     rotations = pc.rotation_activation(pc.splats["quats"])
     
@@ -66,8 +67,8 @@ def rendering_pass(means3D, rotation, scales, opacity, colors, invariance, cam, 
         
         render_mode=gmode,
         
-        # rasterize_mode='antialiased',
-        # eps2d=0.3,
+        rasterize_mode='antialiased',
+        eps2d=0.1,
         
         packed=False,
         near_plane=0.01,
